@@ -33,10 +33,11 @@ leaving normal visitors invisible after the first successful challenge.
 
 ## Requirements
 
-- NGINX with dynamic-module support
+- NGINX 1.30.3 with dynamic-module support (the supported and tested version)
 - OpenSSL 3.x
 - Linux
-- HTTPS recommended
+- HTTPS in production; plain HTTP is only for explicit development use with
+  `pow_cookie_secure off`
 
 ## Configuration
 
@@ -70,7 +71,7 @@ http {
 Create a secret:
 
 ```sh
-openssl rand -hex 32 > /etc/nginx/powgate.secret
+(umask 077 && openssl rand -hex 32 > /etc/nginx/powgate.secret)
 chmod 600 /etc/nginx/powgate.secret
 ```
 

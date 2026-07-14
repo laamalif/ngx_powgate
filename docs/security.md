@@ -72,10 +72,20 @@ Use this two-reload procedure:
    old current secret on line 2.
 2. Run `nginx -t`, then reload NGINX. New workers use the new pair while old
    workers retain their prior configuration cycle.
-3. Keep the previous secret for at least the maximum authentication-cookie
-   TTL.
-4. Atomically replace the file with the current secret alone.
-5. Run `nginx -t`, then reload NGINX a second time.
+3. Use the deployment's process supervision to observe that every worker from
+   the old cycle has exited. Do not start the retention clock at reload: a
+   draining old worker can still issue artifacts with the old current secret.
+4. From the old workers' exit, retain the previous secret for at least the
+   larger of:
+   - the maximum effective `pow_cookie_ttl` in the old cycle; and
+   - twice the maximum effective `pow_challenge_window` in the old cycle.
+5. Atomically replace the file with the current secret alone.
+6. Run `nginx -t`, then reload NGINX a second time.
+
+The cookie interval covers an authentication cookie issued immediately before
+the final old worker exits. The two-window interval covers a challenge issued
+in that worker's current bucket: its proof remains acceptable through the next
+bucket under the protocol's one-bucket clock-skew rule.
 
 NGINX never promotes line 2 automatically. Each reload reparses the configured
 file. If configuration testing or reload fails, the previous configuration

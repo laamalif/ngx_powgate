@@ -149,6 +149,10 @@ http {
 
     server {
         listen 443 ssl;
+        # Replace these placeholders with this server's TLS certificate paths.
+        ssl_certificate /etc/nginx/tls/fullchain.pem;
+        ssl_certificate_key /etc/nginx/tls/private.key;
+
         pow on;
 
         location /health {
