@@ -33,7 +33,7 @@ leaving normal visitors invisible after the first successful challenge.
 
 ## Requirements
 
-- NGINX 1.30.3 with dynamic-module support (the supported and tested version)
+- nginx.org NGINX 1.30.3, or a binary-compatible NGINX 1.30.3 build
 - OpenSSL 3.x
 - Linux
 - HTTPS in production; plain HTTP is only for explicit development use with
