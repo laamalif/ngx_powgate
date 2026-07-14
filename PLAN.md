@@ -240,7 +240,8 @@ requirement rather than substituting for behavioral assertions.
 ## Phase 2 — Module configuration & secret handling
 
 **Goal:** all directives parse, merge, validate; secret loads with rotation
-support. Handler still allows everything.
+support. The handler still allows everything and is registered only when a
+fully merged configuration enables PowGate.
 
 Tasks:
 
@@ -248,7 +249,8 @@ Tasks:
    wherever one exists (custom handlers only for CIDR lists and the secret
    file, per the style guide):
    `pow on|off;` (flag slot)
-   `pow_difficulty N;` (num slot + post validation 1–32, default 17)
+   `pow_difficulty N;` (num slot + post validation 1–32, default 20;
+   operators are advised to use 20–22 unless measurements justify otherwise)
    `pow_challenge_window Ns;` (sec slot, default 60s)
    `pow_cookie_name token;` (str slot + RFC 6265 token validation,
    length ≤ 64; additionally reject a leading `$` — a valid token char,
@@ -262,43 +264,81 @@ Tasks:
    `pow_bind_ipv4 N;` (num slot, 8–32, default 32)
    `pow_bind_ipv6 N;` (num slot, 32–128, default 56)
    `pow_exempt_ip CIDR;` (custom handler, repeatable, `ngx_ptocidr`)
-   `pow_exempt_path prefix;` (custom handler, repeatable)
+   `pow_exempt_path prefix;` (str-array slot + post validation, repeatable)
    `pow_log_level info|notice|warn|error;` (enum slot, modeled
    directly on `limit_req_log_level` — same values, same mechanism)
 2. `create_main_conf` creates `ngx_http_pow_main_conf_t` containing
    `u_char secret[32]`, `u_char secret_prev[32]`, `ngx_flag_t has_prev`, and
    `ngx_flag_t secret_set` (all-zero secrets are valid, so presence needs its
-   own flag). `init_main_conf` rejects an absent `pow_secret_file`; main conf
-   has no merge function.
+   own flag), plus `ngx_flag_t effective_pow_enabled`. Main conf has no merge
+   function and no `init_main_conf` secret requirement.
    `create_loc_conf`/`merge_loc_conf` use `NGX_CONF_UNSET*` sentinels and
    the matching `ngx_conf_merge_*` calls; cross-field validation (window
    vs TTL, difficulty range) after merge, errors via
    `ngx_conf_log_error(NGX_LOG_EMERG, ...)`. Inheritance from `http{}` →
-   `server{}` → `location{}`.
-3. Config-time validation failing `nginx -t`: absent or duplicate
-   `pow_secret_file`, cookie TTL < challenge window, zero challenge window,
-   difficulty out of range, missing/short/world-readable secret file, secret
-   file with >2 lines or non-hex content. The file is opened following
-   symlinks, then `fstat()` is applied to the opened descriptor: it must be a
-   regular file and have no group/other read bits. Symlink targets are allowed;
-   owner is intentionally not constrained.
-4. Secret loading at config parse (master, pre-fork): file format is 1–2
-   lines of 64 lowercase hex chars each (32 bytes decoded); line 1 =
-   current, line 2 = previous. Stored in main conf allocated from `cf->pool`
-   (cycle lifetime). The temporary
-   hex-decode buffer is wiped (`ngx_explicit_memzero`/`OPENSSL_cleanse`)
-   after copying; old-cycle secrets are released with the cycle and no
-   further zeroization is attempted, because nginx pools do not guarantee
-   it — stated in `docs/security.md` so reviewers don't rediscover it.
-5. Integration tests: inheritance matrix (global on, location off; global
-   difficulty, location override), every invalid config rejected by
-   `nginx -t` with a clear error message. Cover a duplicate secret directive,
-   an allowed symlink to a regular secret, and rejected directory, FIFO, and
-   group-readable targets.
+   `server{}` → `location{}`. Each completed location merge that produces
+   effective `pow on` sets `effective_pow_enabled`; this records merged
+   behavior, not mere directive presence. During postconfiguration, inactive
+   configuration returns `NGX_OK` without requiring a secret or registering
+   the access handler. Active configuration requires `secret_set` and then
+   registers the handler. An explicitly configured secret file is always
+   validated, even when the module remains inactive.
+3. Exemption arrays use standard replacement inheritance: a child inherits
+   its parent array only when it declares no entries; otherwise its entries
+   replace the inherited list. Repeated entries at one level append, and
+   duplicates are accepted. `pow_exempt_ip` follows the
+   `ngx_http_access_module` CIDR precedent. Configured exempt paths are stored
+   byte-for-byte. Phase 3 matches them against normalized, percent-decoded
+   `r->uri`; duplicate-slash compression follows the core `merge_slashes`
+   setting and is not unconditional.
+4. Secret loading at config parse (master, pre-fork) accepts exactly four
+   byte layouts: `HEX64`, `HEX64 LF`, `HEX64 LF HEX64`, and
+   `HEX64 LF HEX64 LF`. Each `HEX64` is 64 ASCII hexadecimal bytes;
+   uppercase, lowercase, and mixed case are accepted. Reject CRLF, all other
+   whitespace, BOMs, blank lines, malformed hex, and every extra byte. Line 1
+   is current and signs new cookies and derives new challenges. Optional line
+   2 is previous and verification-only; both are accepted for cookie and
+   proof verification.
+5. Resolve the configured path through `ngx_conf_full_name(..., 1)`, then
+   open it following symlinks with
+   `NGX_FILE_RDONLY | NGX_FILE_NONBLOCK`. Apply `ngx_fd_info`/`fstat()` to
+   the opened descriptor and require a regular file with
+   `(mode & 0077) == 0`; ownership and owner bits are unrestricted. Use a
+   fixed buffer, validate the metadata and actual byte count, detect growth
+   or shrinkage, and follow parse → validate → commit. Wipe raw and
+   decoded temporary buffers on every path. Long-lived decoded secrets reside
+   in cycle configuration memory, whose destruction NGINX does not guarantee
+   to zeroize.
+6. Rotation is operator-managed: atomically replace the file with new current
+   followed by old current, test and reload, retain previous for at least the
+   maximum cookie TTL, then atomically replace it with current alone and
+   reload. Failed test or reload leaves the old cycle serving. Phase 2 proves
+   that reload rereads the file and preserves the old cycle on failure;
+   behavioral configuration inheritance is deferred to Phase 3, and
+   cryptographic current/previous rotation is deferred to Phase 4A. No
+   temporary diagnostic directive, response header, or request behavior is
+   introduced.
+7. Organize integration coverage into five enduring categories:
+   **Configuration** (directives, validation, contexts, merge construction),
+   **Filesystem** (secret grammar, permissions, types, paths, symlinks),
+   **Reload** (cycle lifecycle and worker replacement), **Request** (runtime
+   behavior, activation, exemptions), and **Cryptography** (challenges,
+   proofs, cookies, rotation). A category begins when its production behavior
+   exists. Phase 2 exercises configuration, filesystem, reload, and the
+   existing request smoke behavior. Observable inheritance moves to Phase 3;
+   cryptographic rotation moves to Phase 4A.
+8. Sanitizer policy, project-wide: every implemented integration category
+   runs under ASan and UBSan before release; every finding blocks release.
+   Sanitizer-specific functional or alternate implementation paths are
+   prohibited. Sanitized tests use production NGINX and module source with
+   compiler/linker instrumentation as the only difference. Test fixtures and
+   fault injection add no production directive, request path, or release
+   artifact. Once implemented, a category remains in the sanitizer gate.
 
-**Gate:** `make check` passes; a reload after editing the secret file picks
-up the new secret (integration test proves old-cookie validity via dual
-secrets — stubbed at handler level for now, fully exercised in Phase 4).
+**Gate:** `make check` passes. Reload tests prove file re-reading, successful
+worker replacement, and continued old-cycle service after a failed reload.
+They make no old-cookie-validity claim; dual-secret behavior is fully
+exercised in Phase 4A.
 
 ---
 
@@ -318,7 +358,8 @@ Tasks:
      `/` except `/`. It matches `/` universally; otherwise it matches only an
      exact URI or a URI beginning with `path + "/"` (so `/api` never exempts
      `/apiv2`). Consequently `/static/../admin` is evaluated as `/admin`,
-     while `/%73tatic` is evaluated as `/static`.
+     while `/%73tatic` is evaluated as `/static`. Duplicate-slash compression
+     follows the core `merge_slashes` setting.
    - Extract canonical ip16 + prefix_len from sockaddr (AF_INET →
      IPv4-mapped, AF_INET6 direct), mask per config.
 2. Navigation detection: `GET`/`HEAD` **and** `Accept` header contains
@@ -517,7 +558,8 @@ Tasks:
    `docs/configuration.md` documents normalized `pow_exempt_path` matching,
    duplicate-secret rejection, and the explicit secret-file policy; the
    security guide explains why descriptor-based checks permit symlinks but
-   reject non-regular and group/other-readable targets.
+   reject non-regular targets and targets with any group or other permission
+   bits.
 4. **Request-path matrix** (genuinely overlooked until now): integration
    tests asserting the challenge fires exactly once, on the client-facing
    request only, across nginx's internal routing machinery — `rewrite`
@@ -651,9 +693,30 @@ on the tag.
 
 ## Secret
 
-File of 1–2 lines, each exactly 64 lowercase hex chars (32 bytes decoded).
-Line 1 = current (signs everything new), line 2 = previous (verify only).
-Minimum file permissions: not readable by group/other, else refuse to start.
+The file contains one or two lines, each exactly 64 bytes of ASCII
+hexadecimal (32 bytes decoded). Hexadecimal digits are case-insensitive and
+may be mixed case. Let `HEX64` denote one such 64-byte sequence. Exactly these
+four byte layouts are accepted:
+
+```
+HEX64
+HEX64 LF
+HEX64 LF HEX64
+HEX64 LF HEX64 LF
+```
+
+`LF` is the single byte `0x0A`. CRLF, other whitespace, byte-order marks,
+blank lines, and any extra bytes are rejected.
+
+Line 1 is the current secret: it derives every new challenge nonce and signs
+every new authentication cookie. Line 2, when present, is the previous secret
+and is verification-only. Both secrets are accepted when verifying
+authentication cookies and submitted proofs.
+
+The opened target may have no group or other permission bits
+(`mode & 0077 == 0`). Ownership and owner permission bits are unrestricted.
+The configured path is opened following symlinks; validation is performed
+through the resulting file descriptor against the opened target.
 
 ## Canonical IP (ip16, plen)
 
@@ -700,7 +763,8 @@ Find ASCII-decimal `counter` (1–16 digits, value ≤ 2^53−1) such that:
 leading_zero_bits( SHA256( nonce_raw(32) || counter_ascii ) ) >= difficulty
 ```
 
-`difficulty` ∈ [1, 32], default 17.
+`difficulty` ∈ [1, 32], default 20. Operators are advised to use 20–22
+unless deployment measurements justify another value.
 
 ## Challenge delivery
 
