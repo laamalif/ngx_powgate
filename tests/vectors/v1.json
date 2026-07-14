@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "ipv6-baseline",
+      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "ip": "2001:db8:1234:5678:9abc:def0:1234:5678",
+      "ip16_hex": "20010db8123456789abcdef012345678",
+      "plen": 56,
+      "masked_ip16_hex": "20010db8123456000000000000000000",
+      "bucket": 29333333,
+      "difficulty": 8,
+      "nonce_hex": "c382cd45c32e81f6f5bdcc5fb29497876a3d4364b688245668ab1b578ff7184f",
+      "nonce_b64url": "w4LNRcMugfb1vcxfspSXh2o9Q2S2iCRWaKsbV4_3GE8",
+      "counter": 34,
+      "counter_ascii": "34",
+      "proof_digest_hex": "0028df459a18ed1973ccbfb54439b98bef2e3988fb5072e2fd3b8a1368d275f5",
+      "expiry": 1800000000,
+      "auth_payload_hex": "000000006b49d2000838",
+      "auth_mac_hex": "19f3d98c74537d863c9ee8b05818bf46",
+      "auth_cookie": "1.AAAAAGtJ0gAIOA.GfPZjHRTfYY8nuiwWBi_Rg"
+    }
+  ]
+}

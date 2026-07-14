@@ -7,6 +7,8 @@ STATUS: PROVISIONAL — freezes at v0.1 release (Phase 7)
 - Hash: SHA-256. MAC: HMAC-SHA-256 via OpenSSL's one-shot `HMAC()` —
   decided; `EVP_MAC` is not used (no added value here, more surface).
 - Encoding: base64url, **no padding**, alphabet `A–Z a–z 0–9 - _` only.
+  Unused bits in the final character must be zero; decoders reject alternate,
+  non-canonical encodings of the same bytes.
 - Integers on the wire inside MAC inputs: fixed-width big-endian binary.
 - Integers in cookie/JS-visible fields: ASCII decimal, no sign, no
   leading zeros — grammar `"0" | [1-9][0-9]*`, within each field's stated
@@ -201,8 +203,9 @@ first `__pow_p` occurrence. Per occurrence:
 
 1. Length ≤ 256, strict parse (field count, literals, decoded lengths,
    payload sanity bounds)
-2. MAC with current secret; on failure, MAC with previous secret (always
-   evaluate the second on first-failure so rejection cost is constant)
+2. MAC with the current secret; on failure, always calculate one second HMAC.
+   Use the previous secret when configured; otherwise calculate and discard a
+   second HMAC with the current secret. Never calculate a third HMAC.
 3. `expiry > now`
 4. `difficulty(cookie) >= difficulty(config)` — difficulty floor
 5. `plen(cookie) >= plen(config)` for the connection's address family —

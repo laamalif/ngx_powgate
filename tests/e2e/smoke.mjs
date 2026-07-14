@@ -8,6 +8,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 
+const nginxBinary = process.env.NGX_BINARY ?? '/usr/sbin/nginx';
+const modulePath = process.env.POW_MODULE_PATH
+    ?? '/work/out/ngx_http_pow_module.so';
+
+
 async function listen(server) {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -72,7 +77,7 @@ try {
         fs.mkdir(path.join(prefix, 'scgi_temp'))
     ]);
 
-    const config = `load_module /work/out/ngx_http_pow_module.so;
+    const config = `load_module ${modulePath};
 worker_processes 1;
 error_log /dev/stderr notice;
 pid ${path.join(prefix, 'nginx.pid')};
@@ -96,7 +101,7 @@ http {
 
     await fs.writeFile(configPath, config);
 
-    nginx = spawn('/usr/sbin/nginx', [
+    nginx = spawn(nginxBinary, [
         '-p', prefix,
         '-c', configPath,
         '-e', '/dev/stderr',

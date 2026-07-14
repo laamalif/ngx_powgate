@@ -204,8 +204,8 @@ an unmodified `./configure --with-compat` build. Hardening flags
 (`-D_FORTIFY_SOURCE=2`, `-fstack-protector-strong`) are added via
 `--with-cc-opt` in the Makefile, never by editing nginx's auto files.
 
-The pure core is the exception in the strict direction: since
-`pow_crypto.c`/`pow_cookie.c`/`pow_challenge.c` include no nginx headers,
+The pure core is the exception in the strict direction: since `pow_parse.c`,
+`pow_crypto.c`, `pow_cookie.c`, and `pow_challenge.c` include no nginx headers,
 the standalone unit and fuzz builds compile them with
 `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror`. The same files
 also compile inside the nginx build with nginx's flags — they must be
@@ -213,8 +213,8 @@ clean under both.
 
 ## Sanctioned deviation: the pure core
 
-`pow_crypto.c`, `pow_cookie.c`, `pow_challenge.c` are a freestanding
-library so the fuzz harnesses need no nginx runtime. Their rules:
+`pow_parse.c`, `pow_crypto.c`, `pow_cookie.c`, and `pow_challenge.c` are a
+freestanding library so the fuzz harnesses need no nginx runtime. Their rules:
 
 - No nginx headers. Types are C99 `stdint.h`/`stddef.h` (`uint8_t`,
   `uint64_t`, `size_t`). At the module boundary, `u_char *` and `uint8_t *`
@@ -227,7 +227,7 @@ library so the fuzz harnesses need no nginx runtime. Their rules:
 
 The one-file tradition: many core nginx modules are a single `.c`. ngx_powgate
 deviates for exactly one reason — fuzzability of the hostile-input
-parsers — and confines the deviation to the three pure files. All nginx
+parsers — and confines the deviation to the four pure files. All nginx
 API usage lives in `ngx_http_pow_module.c` and `pow_config.c` (which,
 despite the name, is module-side code and follows module-side naming for
 its nginx-facing functions).

@@ -32,6 +32,8 @@ fi
 pure_files=$(printf '%s\n' "$all_files" \
     | grep -E '/(pow_crypto|pow_parse|pow_cookie|pow_challenge)[^/]*\.[ch]$')
 
+pure_headers=$(printf '%s\n' "$pure_files" | grep -E '\.h$')
+
 nonct_files=$(printf '%s\n' "$all_files" | grep -v '/pow_crypto\.c$')
 
 fail=0
@@ -63,11 +65,18 @@ hits=$(grep -En '(^|[^A-Za-z0-9_])(malloc|calloc|realloc|free)[[:space:]]*\(' \
     $all_files)
 [ -n "$hits" ] && violation "heap allocation; use ngx_pnalloc/ngx_pcalloc" "$hits"
 
-# 4. nginx headers in the pure core (hard rule 4); the pure core is
-#    NGINX-free by contract, C99 stdint/stddef types only
+# 4. nginx headers in the four pure-core file families (hard rule 4); the
+#    pure core is NGINX-free by contract, C99 stdint/stddef types only
 if [ -n "$pure_files" ]; then
     hits=$(grep -En '#[[:space:]]*include[[:space:]]*[<"]ngx' $pure_files)
     [ -n "$hits" ] && violation "nginx header in pure core" "$hits"
+fi
+
+if [ -n "$pure_headers" ]; then
+    hits=$(grep -En '#[[:space:]]*include' $pure_headers \
+        | grep -Ev '<(stddef|stdint)\.h>|"pow_[a-z_]+\.h"')
+    [ -n "$hits" ] \
+        && violation "non-C99 or external include in pure-core header" "$hits"
 fi
 
 # 5. RNG (hard rule 7); the design needs no randomness anywhere — if that
