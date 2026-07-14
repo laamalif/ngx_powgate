@@ -66,6 +66,7 @@ const backendPort = await listen(backend);
 const frontendPort = await reservePort();
 const prefix = await fs.mkdtemp(path.join(os.tmpdir(), 'ngx-powgate-e2e-'));
 const configPath = path.join(prefix, 'nginx.conf');
+const secretPath = path.join(prefix, 'powgate.secret');
 let nginx;
 
 try {
@@ -76,6 +77,7 @@ try {
         fs.mkdir(path.join(prefix, 'uwsgi_temp')),
         fs.mkdir(path.join(prefix, 'scgi_temp'))
     ]);
+    await fs.writeFile(secretPath, '00'.repeat(32), { mode: 0o600 });
 
     const config = `load_module ${modulePath};
 worker_processes 1;
@@ -84,6 +86,7 @@ pid ${path.join(prefix, 'nginx.pid')};
 events { worker_connections 64; }
 http {
     access_log off;
+    pow_secret_file ${secretPath};
     client_body_temp_path ${path.join(prefix, 'client_temp')};
     proxy_temp_path ${path.join(prefix, 'proxy_temp')};
     fastcgi_temp_path ${path.join(prefix, 'fastcgi_temp')};
