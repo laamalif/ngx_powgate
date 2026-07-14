@@ -1,51 +1,112 @@
 # ngx_powgate
 
-PowGate is a native NGINX dynamic module that makes anonymous automation pay
-a small SHA-256 proof-of-work cost. Its v0.1 scope is deliberately narrow:
-stateless verification with two HMACs and no challenge storage, sessions,
-database, cache, Redis, external service, fingerprinting, or reputation data.
+A lightweight proof-of-work abuse gate for NGINX.
 
-The current Phase 0 skeleton provides `pow on|off;`, loads as
-`ngx_http_pow_module.so`, and passes requests through. The frozen protocol and
-later phases add challenge, proof, and cookie behavior.
+ngx_powgate protects self-hosted services by requiring clients to complete a
+small browser-based proof-of-work challenge before reaching the upstream
+application. It runs inside NGINX with no external service, database, or
+challenge backend.
+
+## Planned v0.1 features
+
+- Native NGINX dynamic module
+- Stateless challenge verification
+- HMAC-derived challenges with no server-side sessions
+- Browser proof-of-work solver
+- No external JavaScript, tracking, or third-party dependencies
+- IPv4 and IPv6 prefix binding
+- Signed authentication cookies and secret rotation
+- HTTP/2-compatible protocol
+- Fuzz-tested parsers and ASan/UBSan-hardened builds
+
+## Planned flow
+
+1. A client requests a protected resource.
+2. ngx_powgate checks for a valid authentication cookie.
+3. If none is present, it returns a lightweight challenge.
+4. The browser solves a SHA-256 proof-of-work puzzle.
+5. The client receives a signed cookie.
+6. Future requests pass directly to the upstream service.
+
+The module is designed to make cheap automated abuse more expensive while
+leaving normal visitors invisible after the first successful challenge.
 
 ## Requirements
 
-- Podman
-- The project-managed Debian Trixie golden image
-- OpenSSL 3.x (provided by the golden image; OpenSSL 1.1 is unsupported)
+- NGINX with dynamic-module support
+- OpenSSL 3.x
+- Linux
+- HTTPS recommended
 
-All compilation, tests, fuzzing, and integration work runs in the golden
-image. Do not install project dependencies or run a project `make` target on
-the host.
+## Configuration
 
-## Quickstart
+The current Phase 0 skeleton supports `pow on|off;` and passes requests
+through. The configuration below is the v0.1 target interface and lands in
+later phases.
 
-Build the image from the committed lock file and Containerfile:
+Load the module:
 
-```sh
-podman build -t localhost/ngx-powgate-dev:trixie -f Containerfile .
+```nginx
+load_module modules/ngx_http_pow_module.so;
 ```
 
-Run the Phase 0 checks from the repository root:
+Enable protection:
 
-```sh
-podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
-    localhost/ngx-powgate-dev:trixie make check-policy
-podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
-    localhost/ngx-powgate-dev:trixie make module
-podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
-    localhost/ngx-powgate-dev:trixie make test-integration
-podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
-    localhost/ngx-powgate-dev:trixie make test-e2e
+```nginx
+server {
+    pow on;
+    pow_secret_file /etc/nginx/powgate.secret;
+
+    location / {
+        proxy_pass http://backend;
+    }
+}
 ```
 
-## v0.1 limitations
+Create a secret:
 
-Proof solving requires JavaScript, so clients without JavaScript cannot pass a
-challenge. Search engines may not execute the challenge and can therefore be
-blocked. A cookieless non-idempotent request, such as a form `POST`, receives
-403 rather than transparent completion; v0.1 does not replay requests.
+```sh
+openssl rand -hex 32 > /etc/nginx/powgate.secret
+chmod 600 /etc/nginx/powgate.secret
+```
 
-The wire format is defined by [docs/protocol.md](docs/protocol.md). Treat it
-as the source of truth for every challenge, cookie, and MAC byte.
+Reload NGINX:
+
+```sh
+nginx -t && nginx -s reload
+```
+
+Common settings:
+
+```nginx
+pow_difficulty 17;
+pow_challenge_window 60s;
+pow_cookie_ttl 1h;
+
+pow_bind_ipv4 32;
+pow_bind_ipv6 56;
+
+pow_exempt_ip 192.168.0.0/16;
+pow_exempt_path /health;
+```
+
+Tune difficulty for your hardware and desired visitor experience.
+
+## Security model
+
+ngx_powgate provides:
+
+- Protection against unauthenticated automated request floods
+- Offline cookie-forgery resistance using HMAC-SHA256
+- Deterministic secret-derived challenges
+- Bounded replay exposure through time buckets and IP-prefix binding
+
+It does not attempt to provide:
+
+- Bot fingerprinting
+- User tracking
+- CAPTCHA replacement
+- DDoS protection after traffic saturates the network link
+
+Use upstream network protection for large-scale volumetric attacks. The wire
+format is defined in [docs/protocol.md](docs/protocol.md).
