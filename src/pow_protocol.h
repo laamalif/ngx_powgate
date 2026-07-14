@@ -20,6 +20,7 @@
 #define POW_DIGEST_LEN                  32
 #define POW_AUTH_PAYLOAD_LEN            10
 #define POW_AUTH_MAC_LEN                16
+#define POW_U64_BE_LEN                  8
 
 #define POW_PROOF_FIELD_COUNT           3
 #define POW_AUTH_FIELD_COUNT            3

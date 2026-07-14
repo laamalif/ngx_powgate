@@ -24,9 +24,20 @@ $(BUILD_DIR)/tests/test_crypto: tests/unit/test_crypto.c src/pow_crypto.c \
 	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_crypto.c \
 		src/pow_crypto.c -o $@ $(PURE_LDLIBS)
 
-test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto
+$(BUILD_DIR)/tests/test_challenge: tests/unit/test_challenge.c \
+		src/pow_challenge.c src/pow_challenge.h src/pow_crypto.c \
+		src/pow_crypto.h src/pow_parse.c src/pow_parse.h \
+		src/pow_protocol.h tests/unit/test.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_challenge.c \
+		src/pow_challenge.c src/pow_crypto.c src/pow_parse.c \
+		-o $@ $(PURE_LDLIBS)
+
+test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto \
+		$(BUILD_DIR)/tests/test_challenge
 	./$(BUILD_DIR)/tests/test_parse
 	./$(BUILD_DIR)/tests/test_crypto
+	./$(BUILD_DIR)/tests/test_challenge
 
 module:
 	@set -eu; \
