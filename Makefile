@@ -23,7 +23,8 @@ module:
 	install -m 0755 objs/ngx_http_pow_module.so /work/$(MODULE)
 
 test-integration: module
-	TEST_NGINX_BINARY=/usr/sbin/nginx prove -v tests/integration/pow_module.t
+	TEST_NGINX_BINARY=/usr/sbin/nginx \
+	TEST_NGINX_SERVROOT=/tmp/ngx-powgate-test prove -v tests/integration/pow_module.t
 
 test-e2e: module
 	node tests/e2e/smoke.mjs

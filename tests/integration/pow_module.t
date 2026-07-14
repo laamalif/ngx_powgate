@@ -12,12 +12,12 @@ __DATA__
 --- main_config
 load_module /work/out/ngx_http_pow_module.so;
 --- config
-location / {
+location /pow {
     pow on;
     return 200 "backend\n";
 }
 --- request
-GET /
+GET /pow
 --- response_status
 200
 --- response_body

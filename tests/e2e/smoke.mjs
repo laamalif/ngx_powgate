@@ -64,13 +64,26 @@ const configPath = path.join(prefix, 'nginx.conf');
 let nginx;
 
 try {
-    await fs.writeFile(configPath, `load_module /work/out/ngx_http_pow_module.so;
+    await Promise.all([
+        fs.mkdir(path.join(prefix, 'client_temp')),
+        fs.mkdir(path.join(prefix, 'proxy_temp')),
+        fs.mkdir(path.join(prefix, 'fastcgi_temp')),
+        fs.mkdir(path.join(prefix, 'uwsgi_temp')),
+        fs.mkdir(path.join(prefix, 'scgi_temp'))
+    ]);
+
+    const config = `load_module /work/out/ngx_http_pow_module.so;
 worker_processes 1;
-error_log stderr notice;
+error_log /dev/stderr notice;
 pid ${path.join(prefix, 'nginx.pid')};
 events { worker_connections 64; }
 http {
     access_log off;
+    client_body_temp_path ${path.join(prefix, 'client_temp')};
+    proxy_temp_path ${path.join(prefix, 'proxy_temp')};
+    fastcgi_temp_path ${path.join(prefix, 'fastcgi_temp')};
+    uwsgi_temp_path ${path.join(prefix, 'uwsgi_temp')};
+    scgi_temp_path ${path.join(prefix, 'scgi_temp')};
     server {
         listen 127.0.0.1:${frontendPort};
         location / {
@@ -79,11 +92,14 @@ http {
         }
     }
 }
-`);
+`;
+
+    await fs.writeFile(configPath, config);
 
     nginx = spawn('/usr/sbin/nginx', [
         '-p', prefix,
         '-c', configPath,
+        '-e', '/dev/stderr',
         '-g', 'daemon off;'
     ], { stdio: 'inherit' });
 
