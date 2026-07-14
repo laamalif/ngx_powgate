@@ -15,6 +15,8 @@ static char *ngx_http_pow_valid_cookie_name(ngx_conf_t *cf, void *post,
     void *data);
 static char *ngx_http_pow_valid_exempt_path(ngx_conf_t *cf, void *post,
     void *data);
+static char *ngx_http_pow_exempt_ip(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
 static ngx_int_t ngx_http_pow_is_token_char(u_char ch);
 
 
@@ -114,6 +116,13 @@ ngx_command_t  ngx_http_pow_commands[] = {
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_pow_loc_conf_t, bind_ipv6),
       &ngx_http_pow_bind_ipv6_bounds },
+
+    { ngx_string("pow_exempt_ip"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_http_pow_exempt_ip,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      0,
+      NULL },
 
     { ngx_string("pow_exempt_path"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
@@ -281,6 +290,56 @@ ngx_http_pow_valid_exempt_path(ngx_conf_t *cf, void *post, void *data)
                            "path without a trailing slash");
         return NGX_CONF_ERROR;
     }
+
+    return NGX_CONF_OK;
+}
+
+
+static char *
+ngx_http_pow_exempt_ip(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_int_t                  rc;
+    ngx_str_t                 *value;
+    ngx_cidr_t                 cidr;
+    ngx_cidr_t                *entry;
+    ngx_array_t               *array;
+    ngx_http_pow_loc_conf_t   *plcf;
+
+    plcf = conf;
+    value = cf->args->elts;
+
+    ngx_memzero(&cidr, sizeof(ngx_cidr_t));
+
+    rc = ngx_ptocidr(&value[1], &cidr);
+    if (rc == NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "pow_exempt_ip: value \"%V\" must be a valid "
+                           "IPv4 or IPv6 CIDR", &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    if (rc == NGX_DONE) {
+        ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                           "low address bits of %V are meaningless",
+                           &value[1]);
+    }
+
+    array = plcf->exempt_ips;
+
+    if (array == NGX_CONF_UNSET_PTR) {
+        array = ngx_array_create(cf->pool, 4, sizeof(ngx_cidr_t));
+        if (array == NULL) {
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    entry = ngx_array_push(array);
+    if (entry == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    *entry = cidr;
+    plcf->exempt_ips = array;
 
     return NGX_CONF_OK;
 }
