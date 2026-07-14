@@ -143,12 +143,12 @@ the same commit that introduces any new rule.
 3. **No `malloc`/`free` in request context.** `ngx_pnalloc`/`ngx_pcalloc`
    from `r->pool`; config-time allocations from `cf->pool`. Check every
    allocation for NULL.
-4. **Parsers are pure functions.** `pow_cookie.c`, `pow_challenge.c`,
-   `pow_crypto.c` include no NGINX headers except `ngx_config.h` basics for
-   integer types — signature style:
+4. **Parsers are pure functions.** `pow_parse.c`, `pow_cookie.c`,
+   `pow_challenge.c`, and `pow_crypto.c` include no NGINX headers. Their public
+   APIs use C99 `stdint.h`/`stddef.h` types, caller-provided fixed buffers, and
+   zero allocation — signature style:
    `int pow_cookie_parse(const uint8_t *buf, size_t len, pow_cookie_t *out)`.
-   Output into caller-provided fixed structs. Zero allocation. This is what
-   keeps the fuzz harnesses at 20 lines.
+   This is what keeps the fuzz harnesses at 20 lines.
 5. **Length gate before parsing.** Cookie value > 256 bytes or proof
    cookie > 64 bytes → reject before reading a single field. Exact field
    counts, strict base64url (no padding), exact decoded lengths, reject on
@@ -190,8 +190,8 @@ the same commit that introduces any new rule.
   -Wno-unused-parameter -Werror` via auto/cc) for module-side code. Never
   add `-Wconversion` there (nginx headers don't compile under it) and
   never weaken `-Werror`. Hardening flags go through `--with-cc-opt` only.
-  The **pure core is held to a stricter bar**: `pow_crypto.c`,
-  `pow_cookie.c`, `pow_challenge.c` include no nginx headers, so the
+  The **pure core is held to a stricter bar**: `pow_parse.c`, `pow_crypto.c`,
+  `pow_cookie.c`, and `pow_challenge.c` include no nginx headers, so the
   unit/fuzz builds compile them with
   `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror` — warning-free
   under the full set, no exceptions.
