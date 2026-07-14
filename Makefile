@@ -165,7 +165,9 @@ module:
 
 test-integration: module
 	TEST_NGINX_BINARY=/usr/sbin/nginx \
-	TEST_NGINX_SERVROOT=/tmp/ngx-powgate-test prove -v tests/integration/pow_module.t
+	POW_MODULE_PATH=/work/out/ngx_http_pow_module.so \
+	TEST_NGINX_SERVROOT=/tmp/ngx-powgate-test \
+	prove -Itests/integration/lib -v tests/integration/*.t
 
 test-e2e: module
 	node tests/e2e/smoke.mjs

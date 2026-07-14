@@ -100,6 +100,17 @@ extraction or use.
 Test-only fault injection has no production directive or request path and is
 excluded from release artifacts.
 
+## Sanitizer Policy
+
+- Every implemented integration-test category MUST run under ASan and UBSan
+  before release. Any sanitizer finding is a release blocker.
+- Sanitizer-specific functional behavior and alternate implementation paths
+  are prohibited. Sanitized tests MUST exercise production NGINX and module
+  source; only compiler and linker instrumentation may differ.
+- Test fixtures and fault injection MUST introduce no production directive,
+  request path, or release artifact.
+- A category may be absent only until its production behavior exists. Once
+  introduced, it remains in the sanitizer gate.
 
 ## Build & test commands
 
@@ -230,15 +241,17 @@ the same commit that introduces any new rule.
   `NGX_OK`; challenge responses finalize and return `NGX_DONE`.
 - Bail immediately when `r != r->main || r->internal`.
 - `pow_secret_file` is `http{}`/main-conf-only; a duplicate directive is an
-  error. Follow symlinks, then `fstat()` the opened descriptor before reading:
-  it must be a regular file with no group/other read bits. The owner is
-  intentionally unrestricted.
+  error. Open following symlinks with
+  `NGX_FILE_RDONLY | NGX_FILE_NONBLOCK`, then `fstat()` the opened descriptor
+  before reading: it must be a regular file with `(mode & 0077) == 0`. Owner
+  permissions and ownership are intentionally unrestricted.
 - Exempt paths match normalized, percent-decoded `r->uri`, never `r->args`;
   `/` matches all, otherwise require an exact match or a `/` segment boundary.
 - If either `Set-Cookie` allocation after a valid proof fails, return
   `NGX_HTTP_INTERNAL_SERVER_ERROR`; never pass the request through cookieless.
-- The pure core (`pow_*.c/.h`) is NGINX-free: C99 `stdint.h`/`stddef.h`
-  types only, zero allocation, caller-provided fixed structs.
+- The `pow_parse`, `pow_crypto`, `pow_cookie`, and `pow_challenge` source and
+  header families are NGINX-free: C99 `stdint.h`/`stddef.h` types only, zero
+  allocation, caller-provided fixed structs.
 - New parser behavior = new table rows + new fuzz corpus seeds in the
   same commit.
 

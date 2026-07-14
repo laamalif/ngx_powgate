@@ -21,9 +21,30 @@ STATUS: PROVISIONAL — freezes at v0.1 release (Phase 7)
 
 ## Secret
 
-File of 1–2 lines, each exactly 64 lowercase hex chars (32 bytes decoded).
-Line 1 = current (signs everything new), line 2 = previous (verify only).
-Minimum file permissions: not readable by group/other, else refuse to start.
+The file contains one or two lines, each exactly 64 bytes of ASCII
+hexadecimal (32 bytes decoded). Hexadecimal digits are case-insensitive and
+may be mixed case. Let `HEX64` denote one such 64-byte sequence. Exactly these
+four byte layouts are accepted:
+
+```
+HEX64
+HEX64 LF
+HEX64 LF HEX64
+HEX64 LF HEX64 LF
+```
+
+`LF` is the single byte `0x0A`. CRLF, other whitespace, byte-order marks,
+blank lines, and any extra bytes are rejected.
+
+Line 1 is the current secret: it derives every new challenge nonce and signs
+every new authentication cookie. Line 2, when present, is the previous secret
+and is verification-only. Both secrets are accepted when verifying
+authentication cookies and submitted proofs.
+
+The opened target may have no group or other permission bits
+(`mode & 0077 == 0`). Ownership and owner permission bits are unrestricted.
+The configured path is opened following symlinks; validation is performed
+through the resulting file descriptor against the opened target.
 
 ## Canonical IP (ip16, plen)
 
@@ -70,7 +91,8 @@ Find ASCII-decimal `counter` (1–16 digits, value ≤ 2^53−1) such that:
 leading_zero_bits( SHA256( nonce_raw(32) || counter_ascii ) ) >= difficulty
 ```
 
-`difficulty` ∈ [1, 32], default 17.
+`difficulty` ∈ [1, 32], default 20. Operators are advised to use 20–22
+unless deployment measurements justify another value.
 
 ## Challenge delivery
 
