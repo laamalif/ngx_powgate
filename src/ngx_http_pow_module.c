@@ -65,6 +65,20 @@ ngx_http_pow_init(ngx_conf_t *cf)
 {
     ngx_http_core_main_conf_t  *cmcf;
     ngx_http_handler_pt        *h;
+    ngx_http_pow_main_conf_t   *pmcf;
+
+    pmcf = ngx_http_conf_get_module_main_conf(cf,
+                                              ngx_http_pow_module);
+
+    if (pmcf->effective_pow_enabled == 0) {
+        return NGX_OK;
+    }
+
+    if (pmcf->secret_set == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "pow_secret_file: required when pow is enabled");
+        return NGX_ERROR;
+    }
 
     cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
 

@@ -24,6 +24,53 @@ NGINX
         succeeds => 1,
     },
     {
+        name => 'inherited pow on overridden off in every server',
+        body => <<'NGINX',
+    pow on;
+
+    server {
+        listen 127.0.0.1:8080;
+        pow off;
+
+        location /also-off {
+            pow off;
+        }
+    }
+NGINX
+        succeeds => 1,
+    },
+    {
+        name => 'pow on in server requires a secret',
+        body => <<'NGINX',
+    server {
+        listen 127.0.0.1:8080;
+        pow on;
+    }
+NGINX
+        succeeds => 0,
+        diagnostic => qr/pow_secret_file: required when pow is enabled/,
+    },
+    {
+        name => 'pow on in location requires a secret',
+        body => <<'NGINX',
+    server {
+        listen 127.0.0.1:8080;
+
+        location /protected {
+            pow on;
+        }
+    }
+NGINX
+        succeeds => 0,
+        diagnostic => qr/pow_secret_file: required when pow is enabled/,
+    },
+    {
+        name => 'explicit invalid secret is rejected while pow is off',
+        body => "    pow off;\n    pow_secret_file missing.secret;\n",
+        succeeds => 0,
+        diagnostic => qr/pow_secret_file: open\(\).*failed/,
+    },
+    {
         name => 'standard directives in http',
         body => <<'NGINX',
     pow off;
