@@ -1,6 +1,7 @@
 ngx_module_type=HTTP
 ngx_module_name=ngx_http_pow_module
 ngx_module_srcs="$ngx_addon_dir/src/ngx_http_pow_module.c \
+                 $ngx_addon_dir/src/pow_config.c \
                  $ngx_addon_dir/src/pow_parse.c \
                  $ngx_addon_dir/src/pow_crypto.c \
                  $ngx_addon_dir/src/pow_challenge.c \

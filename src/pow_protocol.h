@@ -51,6 +51,13 @@
 #define POW_COOKIE_TTL_DEFAULT          3600
 #define POW_DIFFICULTY_MIN              1
 #define POW_DIFFICULTY_MAX              32
+#define POW_DIFFICULTY_DEFAULT          20
+#define POW_BIND_IPV4_MIN               8
+#define POW_BIND_IPV4_MAX               32
+#define POW_BIND_IPV4_DEFAULT           32
+#define POW_BIND_IPV6_MIN               POW_IP_PLEN_MIN
+#define POW_BIND_IPV6_MAX               POW_IP_PLEN_MAX
+#define POW_BIND_IPV6_DEFAULT           56
 
 #define POW_PROOF_COUNTER_MAX           9007199254740991ULL
 
