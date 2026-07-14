@@ -50,7 +50,11 @@ Tasks:
    ```
 2. Write `config` using the modern module form (`ngx_module_type=HTTP`,
    `. auto/module`) — not legacy `HTTP_MODULES=`.
-3. `Makefile` targets exactly as named in AGENTS.md. Before the first image
+3. `Makefile` exposes targets exactly as named in AGENTS.md when their real
+   work exists. Phase 0 implements `check-policy`, `module`,
+   `test-integration`, and `test-e2e`; the pure-core targets (`test-unit`,
+   `test-fuzz`, `test-fuzz-long`, `asan`, and aggregate `check`) arrive in
+   Phase 1 with useful work, never passing placeholders. Before the first image
    build is accepted, a committed `build/versions.env` records the immutable
    Debian base-image digest and repository snapshot, nginx.org package
    version/checksum, `NGX_VERSION`, and `NGX_SOURCE_SHA256`; the official
@@ -83,7 +87,8 @@ Tasks:
 5. Verify `docs/nginx-style.md` is in place (pre-created). It is the
    style authority for all C in the project. Likewise verify
    `tools/check-policy.sh` (pre-created, self-tested): wire it as
-   `make check-policy`, a dependency of `make check`, and a CI step —
+   `make check-policy` and a Phase 0 CI step; make it a dependency of
+   `make check` when that target is introduced in Phase 1 —
    every line of C in this project is born under that gate.
 6. Minimal `src/ngx_http_pow_module.c`: module boilerplate written
    strictly to `docs/nginx-style.md` (this first file sets the pattern
@@ -117,15 +122,15 @@ Tasks:
    Podman-only development requirement, quickstart prerequisites, and the
    documented JavaScript/SEO/non-idempotent-request limitations. Later docs
    and release wording must cite this checked-in text, not an assumed README.
-12. CI config (GitHub Actions or equivalent) builds the committed
-   `localhost/ngx-powgate-dev:trixie` image and runs every job inside it; no CI job
-   installs project dependencies outside the image. Use a small matrix:
-   compilers {gcc, clang} × nginx {pinned 1.30.3 source, nginx.org 1.30.3
-   stable package} for
-   `make module` + `make test-integration`; single-config jobs for
-   `make test-unit`, `make asan` (ASan+UBSan), and `make test-fuzz`
-   (60s smoke; clang, since libFuzzer requires it). OpenSSL: 3.x only —
-   1.1 is EOL and explicitly unsupported; state this in the README.
+12. CI is deferred until the project has its complete test surface. The
+   initial skeleton has no GitHub workflow. When CI is introduced after the
+   Phase 1 pure core, it builds the committed
+   `localhost/ngx-powgate-dev:trixie` image and runs all project commands
+   inside it; no CI job installs project dependencies outside the image. Use
+   the compiler/runtime matrix and the `make test-unit`, `make asan`
+   (ASan+UBSan), and `make test-fuzz` (60s smoke; clang, since libFuzzer
+   requires it) jobs then. OpenSSL: 3.x only — 1.1 is EOL and explicitly
+   unsupported; state this in the README.
 
 **Gate:**
 ```
@@ -135,7 +140,7 @@ podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
     localhost/ngx-powgate-dev:trixie make test-integration
 ```
 passes inside the golden image; its nginx.org 1.30.3 runtime accepts a config
-with `pow on;`; CI green.
+with `pow on;`.
 
 ---
 

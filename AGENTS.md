@@ -104,25 +104,31 @@ excluded from release artifacts.
 ## Build & test commands
 
 ```
-make module          # builds ngx_http_pow_module.so against vendored NGINX source
+make check-policy    # source-policy gate, introduced in Phase 0
+make module          # builds ngx_http_pow_module.so against pinned NGINX source
+make test-integration# Test::Nginx suite against a real nginx binary
+make test-e2e        # node-based solver runs the real challenge JS end-to-end
+
+# Introduced in Phase 1 with the real pure core; never placeholder targets.
 make test-unit       # pure-function unit tests (no NGINX needed)
 make test-fuzz       # 60s smoke run of both fuzzers (libFuzzer, ASan)
 make test-fuzz-long  # 10min run, required before any release tag
-make test-integration# Test::Nginx suite against a real nginx binary
-make test-e2e        # node-based solver runs the real challenge JS end-to-end
 make asan            # full rebuild + unit + integration under ASan/UBSan
 make check           # everything above except fuzz-long; the pre-commit gate
 ```
 
-`make check` must pass before any task is considered done. Never mark a
-phase complete with a skipped or commented-out test.
+The Phase 0 gate is `make check-policy`, `make module`,
+`make test-integration`, and `make test-e2e`. Phase 1 introduces the
+pure-core targets and `make check`; from then on `make check` must pass before
+any task is considered done. Never mark a phase complete with a skipped,
+commented-out, or placeholder test.
 
 ## Enforcement
 
 `tools/check-policy.sh` is the authoritative list of banned constructs
 (libc string functions, bare `memcmp`, heap allocation, nginx headers in
-the pure core, RNG). It runs in `make check`, in CI, and on every source
-edit via the Codex hook. Never bypass or weaken it; extend it in
+the pure core, RNG). It runs as a Phase 0 gate, then in `make check`, in CI,
+and on every source edit via the Codex hook. Never bypass or weaken it; extend it in
 the same commit that introduces any new rule.
 
 1. **No NUL-terminated string functions on request data.** Everything off
