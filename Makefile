@@ -18,8 +18,15 @@ $(BUILD_DIR)/tests/test_parse: tests/unit/test_parse.c src/pow_parse.c \
 	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_parse.c \
 		src/pow_parse.c -o $@
 
-test-unit: $(BUILD_DIR)/tests/test_parse
+$(BUILD_DIR)/tests/test_crypto: tests/unit/test_crypto.c src/pow_crypto.c \
+		src/pow_crypto.h src/pow_protocol.h tests/unit/test.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_crypto.c \
+		src/pow_crypto.c -o $@ $(PURE_LDLIBS)
+
+test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto
 	./$(BUILD_DIR)/tests/test_parse
+	./$(BUILD_DIR)/tests/test_crypto
 
 module:
 	@set -eu; \
