@@ -12,7 +12,7 @@ COVERAGE_CFLAGS := $(PURE_CFLAGS) -O0 --coverage
 COVERAGE_LDFLAGS := --coverage
 
 .PHONY: check-policy module test-unit test-vector-python test-fuzz \
-	test-fuzz-long test-coverage test-integration test-e2e
+	test-fuzz-long test-coverage test-integration test-e2e asan check clean
 
 check-policy:
 	./tools/check-policy.sh
@@ -75,11 +75,11 @@ $(BUILD_DIR)/tests/test_vector: tests/unit/test_vector.c \
 test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto \
 		$(BUILD_DIR)/tests/test_challenge $(BUILD_DIR)/tests/test_cookie \
 		$(BUILD_DIR)/tests/test_vector
-	./$(BUILD_DIR)/tests/test_parse
-	./$(BUILD_DIR)/tests/test_crypto
-	./$(BUILD_DIR)/tests/test_challenge
-	./$(BUILD_DIR)/tests/test_cookie
-	./$(BUILD_DIR)/tests/test_vector
+	$(BUILD_DIR)/tests/test_parse
+	$(BUILD_DIR)/tests/test_crypto
+	$(BUILD_DIR)/tests/test_challenge
+	$(BUILD_DIR)/tests/test_cookie
+	$(BUILD_DIR)/tests/test_vector
 
 $(BUILD_DIR)/fuzz/fuzz_cookie: tests/fuzz/fuzz_cookie.c src/pow_cookie.c \
 		src/pow_challenge.c src/pow_crypto.c src/pow_parse.c
@@ -100,11 +100,11 @@ $(BUILD_DIR)/fuzz/fuzz_proof: tests/fuzz/fuzz_proof.c \
 test-fuzz: $(BUILD_DIR)/fuzz/fuzz_cookie $(BUILD_DIR)/fuzz/fuzz_proof
 	@mkdir -p $(BUILD_DIR)/fuzz/corpus-cookie \
 		$(BUILD_DIR)/fuzz/corpus-proof $(BUILD_DIR)/fuzz/artifacts
-	./$(BUILD_DIR)/fuzz/fuzz_cookie -max_total_time=60 -timeout=5 \
+	$(BUILD_DIR)/fuzz/fuzz_cookie -max_total_time=60 -timeout=5 \
 		-max_len=257 \
 		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/cookie- \
 		$(BUILD_DIR)/fuzz/corpus-cookie tests/fuzz/corpus/cookie
-	./$(BUILD_DIR)/fuzz/fuzz_proof -max_total_time=60 -timeout=5 \
+	$(BUILD_DIR)/fuzz/fuzz_proof -max_total_time=60 -timeout=5 \
 		-max_len=65 \
 		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/proof- \
 		$(BUILD_DIR)/fuzz/corpus-proof tests/fuzz/corpus/proof
@@ -112,11 +112,11 @@ test-fuzz: $(BUILD_DIR)/fuzz/fuzz_cookie $(BUILD_DIR)/fuzz/fuzz_proof
 test-fuzz-long: $(BUILD_DIR)/fuzz/fuzz_cookie $(BUILD_DIR)/fuzz/fuzz_proof
 	@mkdir -p $(BUILD_DIR)/fuzz/corpus-cookie \
 		$(BUILD_DIR)/fuzz/corpus-proof $(BUILD_DIR)/fuzz/artifacts
-	./$(BUILD_DIR)/fuzz/fuzz_cookie -max_total_time=600 -timeout=5 \
+	$(BUILD_DIR)/fuzz/fuzz_cookie -max_total_time=600 -timeout=5 \
 		-max_len=257 \
 		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/cookie- \
 		$(BUILD_DIR)/fuzz/corpus-cookie tests/fuzz/corpus/cookie
-	./$(BUILD_DIR)/fuzz/fuzz_proof -max_total_time=600 -timeout=5 \
+	$(BUILD_DIR)/fuzz/fuzz_proof -max_total_time=600 -timeout=5 \
 		-max_len=65 \
 		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/proof- \
 		$(BUILD_DIR)/fuzz/corpus-proof tests/fuzz/corpus/proof
@@ -144,9 +144,9 @@ test-coverage: $(BUILD_DIR)/coverage/test_parse \
 		$(BUILD_DIR)/coverage/test_challenge \
 		$(BUILD_DIR)/coverage/test_cookie
 	@rm -f $(BUILD_DIR)/coverage/*.gcda
-	./$(BUILD_DIR)/coverage/test_parse
-	./$(BUILD_DIR)/coverage/test_challenge
-	./$(BUILD_DIR)/coverage/test_cookie
+	$(BUILD_DIR)/coverage/test_parse
+	$(BUILD_DIR)/coverage/test_challenge
+	$(BUILD_DIR)/coverage/test_cookie
 	./tools/check-parser-coverage.sh $(BUILD_DIR)/coverage
 
 module:
@@ -169,3 +169,12 @@ test-integration: module
 
 test-e2e: module
 	node tests/e2e/smoke.mjs
+
+asan: check-policy
+	./tools/run-asan.sh
+
+check: check-policy test-unit test-coverage module test-integration \
+		test-e2e test-fuzz asan
+
+clean:
+	rm -rf $(BUILD_DIR)/coverage $(BUILD_DIR)/fuzz $(BUILD_DIR)/tests out

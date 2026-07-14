@@ -1,0 +1,8 @@
+# NGINX initializes an empty ngx_str_t with data == NULL, then copies zero
+# bytes from it in ngx_pstrdup(). Suppress only that pinned upstream function.
+nonnull-attribute:ngx_pstrdup
+nonnull-attribute:ngx_sprintf_str
+
+# The generic output chain accepts void *, while protocol-specific filters
+# intentionally narrow that callback argument to their request type.
+function:ngx_output_chain

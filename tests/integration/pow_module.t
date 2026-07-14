@@ -9,8 +9,10 @@ run_tests();
 __DATA__
 
 === TEST 1: pow on passes the request to content
---- main_config
-load_module /work/out/ngx_http_pow_module.so;
+--- main_config eval
+"load_module "
+    . ($ENV{POW_MODULE_PATH} // "/work/out/ngx_http_pow_module.so")
+    . ";"
 --- config
 location /pow {
     pow on;
