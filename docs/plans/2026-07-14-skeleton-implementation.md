@@ -285,48 +285,28 @@ git add README.md
 git commit -m "docs: add project quickstart"
 ```
 
-### Task 5: Add Phase 0 CI
+### Task 5: Defer CI until the full test surface exists
 
 **Files:**
-- Create: `.github/workflows/ci.yml`
+- Modify: `PLAN.md`
 
-**Step 1: Build the golden image in CI.**
+**Step 1: Record the deferral.**
 
-The workflow must build `localhost/ngx-powgate-dev:trixie` from the committed
-Containerfile and version lock. Do not install compilers, Perl modules, Node,
-or NGINX build dependencies in the workflow.
+State that the initial skeleton has no GitHub workflow. CI begins after Phase
+1 when the real unit, fuzz, sanitizer, integration, and e2e targets exist.
 
-**Step 2: Run only the real Phase 0 gates in that image.**
+**Step 2: Preserve the CI constraints for later.**
 
-Run, in separate visible steps:
+When introduced, CI builds `localhost/ngx-powgate-dev:trixie` from the
+committed Containerfile and runs every project command in that image. It does
+not install compilers, Perl modules, Node, or NGINX build dependencies in the
+workflow.
 
-```sh
-make check-policy
-make module
-make test-integration
-make test-e2e
-```
-
-Each command executes with `podman run` against the canonical local image;
-the checkout is bind-mounted at `/work` with the caller UID preserved.
-
-**Step 3: Validate workflow structure.**
-
-Run:
+**Step 3: Commit.**
 
 ```sh
-rg -n 'localhost/ngx-powgate-dev:trixie|make (check-policy|module|test-integration|test-e2e)' \
-    .github/workflows/ci.yml
-```
-
-Expected: all four Phase 0 gates are explicit and no dependency-install step
-appears after image build.
-
-**Step 4: Commit.**
-
-```sh
-git add .github/workflows/ci.yml
-git commit -m "ci: add skeleton checks"
+git add PLAN.md
+git commit -m "docs: defer ci setup"
 ```
 
 ### Task 6: Run the Phase 0 acceptance gate

@@ -122,13 +122,14 @@ Tasks:
    Podman-only development requirement, quickstart prerequisites, and the
    documented JavaScript/SEO/non-idempotent-request limitations. Later docs
    and release wording must cite this checked-in text, not an assumed README.
-12. Phase 0 CI (GitHub Actions or equivalent) builds the committed
-   `localhost/ngx-powgate-dev:trixie` image and runs `make check-policy`,
-   `make module`, `make test-integration`, and `make test-e2e` inside it; no
-   CI job installs project dependencies outside the image. Phase 1 adds the
-   compiler/runtime matrix and the `make test-unit`, `make asan`
+12. CI is deferred until the project has its complete test surface. The
+   initial skeleton has no GitHub workflow. When CI is introduced after the
+   Phase 1 pure core, it builds the committed
+   `localhost/ngx-powgate-dev:trixie` image and runs all project commands
+   inside it; no CI job installs project dependencies outside the image. Use
+   the compiler/runtime matrix and the `make test-unit`, `make asan`
    (ASan+UBSan), and `make test-fuzz` (60s smoke; clang, since libFuzzer
-   requires it) jobs. OpenSSL: 3.x only — 1.1 is EOL and explicitly
+   requires it) jobs then. OpenSSL: 3.x only — 1.1 is EOL and explicitly
    unsupported; state this in the README.
 
 **Gate:**
@@ -139,7 +140,7 @@ podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
     localhost/ngx-powgate-dev:trixie make test-integration
 ```
 passes inside the golden image; its nginx.org 1.30.3 runtime accepts a config
-with `pow on;`; CI green.
+with `pow on;`.
 
 ---
 
