@@ -1,7 +1,11 @@
 use strict;
 use warnings;
 
+use File::Path qw(make_path);
 use File::Temp qw(tempdir);
+use IO::Socket::UNIX;
+use POSIX qw(mkfifo);
+use Socket qw(SOCK_STREAM);
 use Test::More;
 
 use PowGate::TestNginx qw(run_nginx_t write_file);
@@ -114,6 +118,149 @@ subtest 'relative secret path uses configuration prefix' => sub {
     ok !$result->{timed_out}, 'nginx -t completed before timeout';
     is $result->{exit_status}, 0, 'configuration-prefix path is accepted';
 };
+
+my @file_targets = (
+    {
+        name => 'regular file mode 0400',
+        kind => 'regular',
+        mode => 0400,
+        accepted => 1,
+    },
+    {
+        name => 'regular file mode 0600',
+        kind => 'regular',
+        mode => 0600,
+        accepted => 1,
+    },
+    map(
+        {
+            name => sprintf('regular file mode %04o', $_),
+            kind => 'regular',
+            mode => $_,
+            accepted => 0,
+            diagnostic => qr/must grant no group or other permissions/,
+        },
+        0610, 0620, 0640, 0601, 0602, 0604,
+    ),
+    {
+        name => 'directory mode 0700',
+        kind => 'directory',
+        mode => 0700,
+        accepted => 0,
+        diagnostic => qr/must be a regular file/,
+    },
+    {
+        name => 'FIFO mode 0600',
+        kind => 'fifo',
+        mode => 0600,
+        accepted => 0,
+        diagnostic => qr/must be a regular file/,
+    },
+    {
+        name => 'symlink to FIFO mode 0600',
+        kind => 'symlink_fifo',
+        mode => 0600,
+        accepted => 0,
+        diagnostic => qr/must be a regular file/,
+    },
+    {
+        name => 'Unix socket node',
+        kind => 'socket',
+        accepted => 0,
+        diagnostic => qr/(?:must be a regular file|open\(\).*failed)/,
+    },
+    {
+        name => '/dev/null',
+        kind => 'device',
+        accepted => 0,
+        diagnostic => qr/must be a regular file/,
+    },
+    {
+        name => 'symlink to valid regular file mode 0600',
+        kind => 'symlink_regular',
+        mode => 0600,
+        accepted => 1,
+    },
+    {
+        name => 'broken symlink',
+        kind => 'broken_symlink',
+        accepted => 0,
+        diagnostic => qr/open\(\).*failed/,
+    },
+);
+
+for my $row (@file_targets) {
+    subtest $row->{name} => sub {
+        my $socket;
+        my $directive = $row->{kind} eq 'device'
+            ? "    pow_secret_file /dev/null;\n"
+            : "    pow_secret_file pow.secret;\n";
+        my $result = run_nginx_t(
+            $directive,
+            setup => sub {
+                my ($prefix) = @_;
+                my $path = "$prefix/conf/pow.secret";
+                my $target = "$prefix/conf/pow.secret.target";
+
+                if ($row->{kind} eq 'regular') {
+                    write_file($path, $lower, $row->{mode});
+
+                } elsif ($row->{kind} eq 'directory') {
+                    make_path($path, { mode => $row->{mode} });
+                    chmod $row->{mode}, $path
+                        or die "chmod $path: $!";
+
+                } elsif ($row->{kind} eq 'fifo') {
+                    mkfifo($path, $row->{mode})
+                        or die "mkfifo $path: $!";
+                    chmod $row->{mode}, $path
+                        or die "chmod $path: $!";
+
+                } elsif ($row->{kind} eq 'symlink_fifo') {
+                    mkfifo($target, $row->{mode})
+                        or die "mkfifo $target: $!";
+                    chmod $row->{mode}, $target
+                        or die "chmod $target: $!";
+                    symlink 'pow.secret.target', $path
+                        or die "symlink $path: $!";
+
+                } elsif ($row->{kind} eq 'socket') {
+                    $socket = IO::Socket::UNIX->new(
+                        Local => $path,
+                        Listen => 1,
+                        Type => SOCK_STREAM,
+                    ) or die "create Unix socket $path: $!";
+
+                } elsif ($row->{kind} eq 'symlink_regular') {
+                    write_file($target, $lower, $row->{mode});
+                    symlink 'pow.secret.target', $path
+                        or die "symlink $path: $!";
+
+                } elsif ($row->{kind} eq 'broken_symlink') {
+                    symlink 'missing.secret', $path
+                        or die "symlink $path: $!";
+                }
+            },
+        );
+
+        ok !$result->{timed_out}, 'nginx -t completed before timeout';
+        is $result->{signal}, 0, 'nginx -t was not signalled';
+
+        if ($row->{accepted}) {
+            is $result->{exit_status}, 0, 'file target is accepted';
+        } else {
+            isnt $result->{exit_status}, 0, 'file target is rejected';
+            like $result->{diagnostic}, $row->{diagnostic},
+                'diagnostic identifies the file policy violation';
+        }
+    };
+}
+
+# The loader detects size changes by comparing descriptor metadata, bytes read,
+# and EOF.  A same-size concurrent in-place rewrite cannot be synchronized here
+# without a production hook.  Code review audits those unexercised race
+# branches, sanitizer runs cover executed loader paths, and operators must
+# replace secrets atomically.
 
 subtest 'embedded NUL in secret path is rejected before open' => sub {
     my $path_sentinel = 'powgate-hidden-path-suffix';
