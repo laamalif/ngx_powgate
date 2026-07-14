@@ -310,14 +310,19 @@ Tasks:
    in cycle configuration memory, whose destruction NGINX does not guarantee
    to zeroize.
 6. Rotation is operator-managed: atomically replace the file with new current
-   followed by old current, test and reload, retain previous for at least the
-   maximum cookie TTL, then atomically replace it with current alone and
-   reload. Failed test or reload leaves the old cycle serving. Phase 2 proves
-   that reload rereads the file and preserves the old cycle on failure;
-   behavioral configuration inheritance is deferred to Phase 3, and
-   cryptographic current/previous rotation is deferred to Phase 4A. No
-   temporary diagnostic directive, response header, or request behavior is
-   introduced.
+   followed by old current, test, and reload. After this first successful
+   reload, wait until all workers from the old cycle have exited. From that
+   exit point, retain previous for at least
+   `max(maximum effective auth-cookie TTL in the old cycle, 2 × maximum
+   effective challenge window in the old cycle)`, then atomically replace the
+   file with current alone, test, and reload a second time. The two-window
+   bound covers the protocol's ±1-bucket acceptance when an old worker issues
+   a challenge at bucket start. Failed test or reload leaves the old cycle
+   serving. Phase 2 proves that reload rereads the file and preserves the old
+   cycle on failure; current-secret nonce derivation is deferred to Phase 3,
+   and previous-secret verification and cryptographic rotation are deferred
+   to Phase 4A. No temporary diagnostic directive, response header, or request
+   behavior is introduced.
 7. Organize integration coverage into five enduring categories:
    **Configuration** (directives, validation, contexts, merge construction),
    **Filesystem** (secret grammar, permissions, types, paths, symlinks),

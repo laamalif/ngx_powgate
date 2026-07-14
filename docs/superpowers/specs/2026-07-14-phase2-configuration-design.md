@@ -372,15 +372,21 @@ current secret. The documented procedure is:
    line 2;
 2. run `nginx -t`;
 3. reload NGINX;
-4. retain the previous secret for at least the maximum authentication-cookie
-   TTL;
-5. atomically replace the file with the current secret alone and reload
-   again.
+4. after this first successful reload, wait until all workers from the old
+   cycle have exited;
+5. from that exit point, retain the previous secret for at least
+   `max(maximum effective authentication-cookie TTL in the old cycle, 2 ×
+   maximum effective challenge window in the old cycle)`;
+6. atomically replace the file with the current secret alone;
+7. run `nginx -t` and reload NGINX a second time.
 
 Old workers retain the old cycle while new workers load the new pair. A
 failed test or reload leaves the old cycle serving. Secret updates must use
 atomic replacement for defined rotation behavior; a regular-file read is not
-a transactional snapshot of a concurrent in-place write.
+a transactional snapshot of a concurrent in-place write. The retention clock
+starts only after the old workers exit because a draining worker may still
+issue artifacts with its current secret. The two-window bound covers the
+protocol's ±1-bucket acceptance when a challenge is issued at bucket start.
 
 Phase 2 proves that reload reparses the file and preserves the old cycle on
 failure. Phase 4A proves cryptographically that cookies and proofs created
@@ -485,9 +491,11 @@ This proves file re-reading and lifecycle behavior without exposing secret
 values. It deliberately does not claim old-cookie validity in Phase 2.
 
 Behavioral scalar and exemption inheritance moves to Phase 3, where emitted
-challenges and allow/deny outcomes make merged values observable. Current and
-previous secret selection moves to Phase 4A, where real cookies and proofs
-exercise it. No temporary Phase 2 introspection surface is permitted.
+challenges and allow/deny outcomes make merged values observable.
+Current-secret nonce derivation also begins in Phase 3. Previous-secret
+verification fallback and cryptographic rotation move to Phase 4A, where real
+cookies and proofs exercise them. No temporary Phase 2 introspection surface
+is permitted.
 
 ### Sanitizer policy
 

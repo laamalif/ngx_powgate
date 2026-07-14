@@ -56,8 +56,9 @@ configuration pools when a cycle is destroyed or its workers exit.
 The first secret is current. In the later request-processing phases, it
 derives every new challenge nonce and signs every new authentication cookie.
 The optional second secret is previous and is used only as a verification
-fallback. Both are loaded in Phase 2; cryptographic consumption is implemented
-in Phase 4.
+fallback. Both are loaded and validated in Phase 2. Current-secret nonce
+derivation begins in Phase 3. Cookie signing and cookie/proof verification,
+including previous-secret fallback, begin in Phase 4A.
 
 ## Rotation
 
@@ -92,6 +93,6 @@ file. If configuration testing or reload fails, the previous configuration
 cycle continues serving, so correct atomic replacement does not partially
 change the active secret pair.
 
-Phase 2 tests this file and reload lifecycle. Phase 4 tests that artifacts
+Phase 2 tests this file and reload lifecycle. Phase 4A tests that artifacts
 created before the first reload verify through the previous secret and stop
 verifying after the second secret is removed.
