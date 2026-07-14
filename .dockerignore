@@ -1,0 +1,26 @@
+# VCS and local agent/worktree metadata are never part of the image context.
+.git
+.codex
+.agents
+.worktrees
+worktrees
+
+# The development image downloads and verifies its own NGINX source cache.
+.cache
+cache
+dist
+out
+coverage
+vendor
+
+# Native build and test artifacts.
+*.o
+*.a
+*.so
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+*.log
+*.tmp

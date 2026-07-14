@@ -1,0 +1,25 @@
+# Local Codex and worktree state.
+.codex/
+.agents/
+.worktrees/
+worktrees/
+
+# Reproducible but untracked build caches and outputs.
+.cache/
+cache/
+dist/
+out/
+coverage/
+vendor/
+
+# Native build and test artifacts.
+*.o
+*.a
+*.so
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+*.log
+*.tmp
