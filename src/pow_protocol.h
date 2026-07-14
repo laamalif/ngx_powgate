@@ -6,6 +6,8 @@
 #define POW_VERSION_TEXT                "1"
 #define POW_VERSION_TEXT_LEN            1
 #define POW_FIELD_SEPARATOR             '.'
+#define POW_B64URL_ALPHABET             \
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 #define POW_CHALLENGE_LABEL             "PGv1-chal"
 #define POW_CHALLENGE_LABEL_LEN         9

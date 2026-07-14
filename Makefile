@@ -2,11 +2,24 @@ SHELL := /bin/sh
 
 NGX_SOURCE_DIR ?= /opt/ngx-powgate/nginx-source
 MODULE := out/ngx_http_pow_module.so
+BUILD_DIR ?= build
+PURE_CFLAGS := -std=c99 -Wall -Wextra -Wpedantic -Wconversion \
+	-Wshadow -Werror -Isrc
+PURE_LDLIBS := -lcrypto
 
-.PHONY: check-policy module test-integration test-e2e
+.PHONY: check-policy module test-unit test-integration test-e2e
 
 check-policy:
 	./tools/check-policy.sh
+
+$(BUILD_DIR)/tests/test_parse: tests/unit/test_parse.c src/pow_parse.c \
+		src/pow_parse.h src/pow_protocol.h tests/unit/test.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_parse.c \
+		src/pow_parse.c -o $@
+
+test-unit: $(BUILD_DIR)/tests/test_parse
+	./$(BUILD_DIR)/tests/test_parse
 
 module:
 	@set -eu; \

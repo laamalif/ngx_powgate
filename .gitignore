@@ -13,6 +13,7 @@ coverage/
 vendor/
 
 # Native build and test artifacts.
+build/
 *.o
 *.a
 *.so
