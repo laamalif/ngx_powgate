@@ -7,19 +7,30 @@ PURE_CFLAGS := -std=c99 -Wall -Wextra -Wpedantic -Wconversion \
 	-Wshadow -Werror -Isrc
 PURE_LDLIBS := -lcrypto
 
-.PHONY: check-policy module test-unit test-integration test-e2e
+.PHONY: check-policy module test-unit test-vector-python test-integration \
+	test-e2e
 
 check-policy:
 	./tools/check-policy.sh
 
+$(BUILD_DIR)/tests/vector-v1.verified: tools/refsolve.py \
+		tests/vectors/v1.json
+	@mkdir -p $(@D)
+	python3 tools/refsolve.py verify tests/vectors/v1.json
+	@touch $@
+
+test-vector-python: $(BUILD_DIR)/tests/vector-v1.verified
+
 $(BUILD_DIR)/tests/test_parse: tests/unit/test_parse.c src/pow_parse.c \
-		src/pow_parse.h src/pow_protocol.h tests/unit/test.h
+		src/pow_parse.h src/pow_protocol.h tests/unit/test.h \
+		| $(BUILD_DIR)/tests/vector-v1.verified
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_parse.c \
 		src/pow_parse.c -o $@
 
 $(BUILD_DIR)/tests/test_crypto: tests/unit/test_crypto.c src/pow_crypto.c \
-		src/pow_crypto.h src/pow_protocol.h tests/unit/test.h
+		src/pow_crypto.h src/pow_protocol.h tests/unit/test.h \
+		| $(BUILD_DIR)/tests/vector-v1.verified
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_crypto.c \
 		src/pow_crypto.c -o $@ $(PURE_LDLIBS)
@@ -27,7 +38,8 @@ $(BUILD_DIR)/tests/test_crypto: tests/unit/test_crypto.c src/pow_crypto.c \
 $(BUILD_DIR)/tests/test_challenge: tests/unit/test_challenge.c \
 		src/pow_challenge.c src/pow_challenge.h src/pow_crypto.c \
 		src/pow_crypto.h src/pow_parse.c src/pow_parse.h \
-		src/pow_protocol.h tests/unit/test.h
+		src/pow_protocol.h tests/unit/test.h \
+		| $(BUILD_DIR)/tests/vector-v1.verified
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_challenge.c \
 		src/pow_challenge.c src/pow_crypto.c src/pow_parse.c \
@@ -36,18 +48,34 @@ $(BUILD_DIR)/tests/test_challenge: tests/unit/test_challenge.c \
 $(BUILD_DIR)/tests/test_cookie: tests/unit/test_cookie.c src/pow_cookie.c \
 		src/pow_cookie.h src/pow_challenge.c src/pow_challenge.h \
 		src/pow_crypto.c src/pow_crypto.h src/pow_parse.c src/pow_parse.h \
-		src/pow_protocol.h tests/unit/test.h
+		src/pow_protocol.h tests/unit/test.h \
+		| $(BUILD_DIR)/tests/vector-v1.verified
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_cookie.c \
 		src/pow_cookie.c src/pow_challenge.c src/pow_crypto.c \
 		src/pow_parse.c -o $@ $(PURE_LDLIBS)
 
+$(BUILD_DIR)/tests/vector_v1.h: tests/vectors/v1.json tools/vector-to-c.py \
+		$(BUILD_DIR)/tests/vector-v1.verified
+	python3 tools/vector-to-c.py tests/vectors/v1.json $@
+
+$(BUILD_DIR)/tests/test_vector: tests/unit/test_vector.c \
+		$(BUILD_DIR)/tests/vector_v1.h src/pow_cookie.c src/pow_cookie.h \
+		src/pow_challenge.c src/pow_challenge.h src/pow_crypto.c \
+		src/pow_crypto.h src/pow_parse.c src/pow_parse.h \
+		src/pow_protocol.h tests/unit/test.h
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) -I$(BUILD_DIR)/tests \
+		tests/unit/test_vector.c src/pow_cookie.c src/pow_challenge.c \
+		src/pow_crypto.c src/pow_parse.c -o $@ $(PURE_LDLIBS)
+
 test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto \
-		$(BUILD_DIR)/tests/test_challenge $(BUILD_DIR)/tests/test_cookie
+		$(BUILD_DIR)/tests/test_challenge $(BUILD_DIR)/tests/test_cookie \
+		$(BUILD_DIR)/tests/test_vector
 	./$(BUILD_DIR)/tests/test_parse
 	./$(BUILD_DIR)/tests/test_crypto
 	./$(BUILD_DIR)/tests/test_challenge
 	./$(BUILD_DIR)/tests/test_cookie
+	./$(BUILD_DIR)/tests/test_vector
 
 module:
 	@set -eu; \
