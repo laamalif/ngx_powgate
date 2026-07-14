@@ -264,11 +264,9 @@ pow_b64url_decode_exact(const uint8_t *src, size_t src_len, uint8_t *dst,
         dst[o++] = (uint8_t) ((v0 << 2) | (v1 >> 4));
         dst[o++] = (uint8_t) ((v1 << 4) | (v2 >> 2));
 
-    } else if (remainder != 0) {
-        return 0;
     }
 
-    return o == expected_len ? 1 : 0;
+    return 1;
 }
 
 

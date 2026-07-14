@@ -86,7 +86,8 @@ test_decimal(void)
         { (const uint8_t *) "1a", 2, 20, UINT64_MAX },
         { (const uint8_t *) "18446744073709551616", 20, 20, UINT64_MAX },
         { (const uint8_t *) "100", 3, 2, UINT64_MAX },
-        { (const uint8_t *) "11", 2, 2, UINT64_C(10) }
+        { (const uint8_t *) "11", 2, 2, UINT64_C(10) },
+        { (const uint8_t *) "9", 1, 1, UINT64_C(8) }
     };
     uint64_t  value;
     size_t    i;
@@ -195,14 +196,25 @@ test_base64_reject(void)
         size_t          len;
         size_t          decoded_len;
     } cases[] = {
+        { (const uint8_t *) "", 0, 1 },
         { (const uint8_t *) "=", 1, 1 },
         { (const uint8_t *) "AA=", 3, 1 },
         { (const uint8_t *) "AA+", 3, 2 },
         { (const uint8_t *) "AA/", 3, 2 },
         { (const uint8_t *) "A", 1, 1 },
+        { (const uint8_t *) "AA", 2, 0 },
         { (const uint8_t *) "AA", 2, 2 },
         { (const uint8_t *) "AB", 2, 1 },
-        { (const uint8_t *) "AAB", 3, 2 }
+        { (const uint8_t *) "AAB", 3, 2 },
+        { (const uint8_t *) "+AAA", 4, 3 },
+        { (const uint8_t *) "A+AA", 4, 3 },
+        { (const uint8_t *) "AA+A", 4, 3 },
+        { (const uint8_t *) "AAA+", 4, 3 },
+        { (const uint8_t *) "+A", 2, 1 },
+        { (const uint8_t *) "A+", 2, 1 },
+        { (const uint8_t *) "+AA", 3, 2 },
+        { (const uint8_t *) "A+A", 3, 2 },
+        { (const uint8_t *) "{AAA", 4, 3 }
     };
     uint8_t  decoded[4];
     size_t   i;

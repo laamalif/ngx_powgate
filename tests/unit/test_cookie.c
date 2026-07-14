@@ -138,6 +138,7 @@ test_parse_rejects_structure_and_encoding(void)
     static const uint8_t *cases[] = {
         (const uint8_t *) "",
         (const uint8_t *) "2.AAAAAGtJ0gAIOA.GfPZjHRTfYY8nuiwWBi_Rg",
+        (const uint8_t *) "11.AAAAAGtJ0gAIOA.GfPZjHRTfYY8nuiwWBi_Rg",
         (const uint8_t *) "1.AAAAAGtJ0gAIOA",
         (const uint8_t *) "1.AAAAAGtJ0gAIOA.GfPZjHRTfYY8nuiwWBi_Rg.x",
         (const uint8_t *) "1..GfPZjHRTfYY8nuiwWBi_Rg",
@@ -149,7 +150,7 @@ test_parse_rejects_structure_and_encoding(void)
         (const uint8_t *) "1.AAAAAGtJ0gAIOA.GfPZjHRTfYY8nuiwWBi_R"
     };
     static const size_t  lengths[] = {
-        0, 39, 16, 41, 25, 39, 39, 39, 39, 38, 38
+        0, 39, 40, 16, 41, 25, 39, 39, 39, 39, 38, 38
     };
     uint8_t       too_long[POW_AUTH_COOKIE_MAX_LEN + 1];
     pow_cookie_t  parsed;

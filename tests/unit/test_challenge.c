@@ -224,6 +224,7 @@ test_proof_parse_reject(void)
     static const uint8_t *cases[] = {
         (const uint8_t *) "",
         (const uint8_t *) "2.1.1",
+        (const uint8_t *) "11.1.1",
         (const uint8_t *) "1.1",
         (const uint8_t *) "1.1.1.1",
         (const uint8_t *) "1..1",
@@ -235,7 +236,7 @@ test_proof_parse_reject(void)
         (const uint8_t *) "1.1.9007199254740992"
     };
     static const size_t  lengths[] = {
-        0, 5, 3, 7, 4, 6, 6, 25, 24, 21, 20
+        0, 5, 6, 3, 7, 4, 6, 6, 25, 24, 21, 20
     };
     uint8_t      too_long[POW_PROOF_COOKIE_MAX_LEN + 1];
     pow_proof_t  proof;
