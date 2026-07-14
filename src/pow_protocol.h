@@ -15,7 +15,10 @@
 #define POW_COOKIE_LABEL_LEN            9
 
 #define POW_SECRET_LEN                  32
+#define POW_IPV4_LEN                    4
 #define POW_IP_LEN                      16
+#define POW_IP_PLEN_MIN                 32
+#define POW_IP_PLEN_MAX                 128
 #define POW_NONCE_LEN                   32
 #define POW_DIGEST_LEN                  32
 #define POW_AUTH_PAYLOAD_LEN            10

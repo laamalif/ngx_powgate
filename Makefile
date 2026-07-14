@@ -33,11 +33,21 @@ $(BUILD_DIR)/tests/test_challenge: tests/unit/test_challenge.c \
 		src/pow_challenge.c src/pow_crypto.c src/pow_parse.c \
 		-o $@ $(PURE_LDLIBS)
 
+$(BUILD_DIR)/tests/test_cookie: tests/unit/test_cookie.c src/pow_cookie.c \
+		src/pow_cookie.h src/pow_challenge.c src/pow_challenge.h \
+		src/pow_crypto.c src/pow_crypto.h src/pow_parse.c src/pow_parse.h \
+		src/pow_protocol.h tests/unit/test.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_cookie.c \
+		src/pow_cookie.c src/pow_challenge.c src/pow_crypto.c \
+		src/pow_parse.c -o $@ $(PURE_LDLIBS)
+
 test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto \
-		$(BUILD_DIR)/tests/test_challenge
+		$(BUILD_DIR)/tests/test_challenge $(BUILD_DIR)/tests/test_cookie
 	./$(BUILD_DIR)/tests/test_parse
 	./$(BUILD_DIR)/tests/test_crypto
 	./$(BUILD_DIR)/tests/test_challenge
+	./$(BUILD_DIR)/tests/test_cookie
 
 module:
 	@set -eu; \

@@ -16,7 +16,8 @@ static void pow_write_u64_be(uint8_t *dst, uint64_t value);
 
 
 void
-pow_ip16_from_ipv4(const uint8_t ipv4[4], uint8_t out[POW_IP_LEN])
+pow_ip16_from_ipv4(const uint8_t ipv4[POW_IPV4_LEN],
+    uint8_t out[POW_IP_LEN])
 {
     size_t  i;
 
@@ -31,7 +32,7 @@ pow_ip16_from_ipv4(const uint8_t ipv4[4], uint8_t out[POW_IP_LEN])
     out[POW_IPV4_MAPPED_FF_OFFSET] = 0xffU;
     out[POW_IPV4_MAPPED_FF_OFFSET + 1] = 0xffU;
 
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < POW_IPV4_LEN; i++) {
         out[POW_IPV4_MAPPED_ADDR_OFFSET + i] = ipv4[i];
     }
 }
@@ -61,11 +62,11 @@ pow_ip16_mask(uint8_t ip16[POW_IP_LEN], uint8_t plen)
     uint8_t  bits;
     uint8_t  mask;
 
-    if (ip16 == NULL || plen > 128) {
+    if (ip16 == NULL || plen > POW_IP_PLEN_MAX) {
         return 0;
     }
 
-    if (plen == 128) {
+    if (plen == POW_IP_PLEN_MAX) {
         return 1;
     }
 
@@ -108,7 +109,9 @@ pow_challenge_derive(const uint8_t secret[POW_SECRET_LEN],
     size_t                i;
     size_t                offset;
 
-    if (secret == NULL || ip16 == NULL || nonce == NULL || plen > 128) {
+    if (secret == NULL || ip16 == NULL || nonce == NULL
+        || plen > POW_IP_PLEN_MAX)
+    {
         return 0;
     }
 

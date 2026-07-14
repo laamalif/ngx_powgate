@@ -16,7 +16,7 @@ typedef struct {
 } pow_proof_t;
 
 
-void pow_ip16_from_ipv4(const uint8_t ipv4[4],
+void pow_ip16_from_ipv4(const uint8_t ipv4[POW_IPV4_LEN],
     uint8_t out[POW_IP_LEN]);
 void pow_ip16_from_ipv6(const uint8_t ipv6[POW_IP_LEN],
     uint8_t out[POW_IP_LEN]);
