@@ -184,7 +184,8 @@ never overlaps or skips work.
 ## Backend initialization and known-answer test
 
 The controller tries the fixed primary backend first. Before mining, it runs
-one production-shaped known-answer test through `solve()`:
+one production-shaped known-answer test through the same backend digest
+primitive used by `solve()`:
 
 ```text
 fixed nonce_raw(32)
@@ -195,9 +196,11 @@ fixed nonce_raw(32)
         -> expected successful counter
 ```
 
-This performs exactly one candidate hash, not a proof search. It tests the
-actual counter encoding, message construction, digest, leading-zero
-calculation, threshold comparison, and result contract.
+This performs exactly one candidate hash, not a proof search. It compares the
+complete 32-byte digest with the checked-in expected digest, then checks the
+leading-zero calculation and threshold for the fixed candidate. It therefore
+tests the actual counter encoding, message construction, digest, and proof
+predicate without adding a digest field to the public result contract.
 
 Initialization/self-test failure means:
 
