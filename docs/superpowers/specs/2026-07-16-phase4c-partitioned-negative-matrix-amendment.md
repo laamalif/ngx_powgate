@@ -40,6 +40,34 @@ repairs, or deletes the cookie. The literal `1.0.0` is an intentionally invalid
 fixture value used only to exercise residual-cookie detection. The server must
 never accept it as proof, and no retained diagnostic stores the raw value.
 
+`/__powgate_partitioned_seed` is fixture-only. It is not protected by PowGate,
+does not reach the protected backend, emits exactly the intended Set-Cookie and
+no unrelated PowGate cookie, and returns fixed non-executable content with no
+redirect or external resource. The harness completes and verifies the seed
+response and stored cookie, then advances every navigation, request, cookie,
+and event observation cursor before the challenge phase. Seed activity is
+excluded from challenge-phase navigation and backend counts.
+
+Pinned Chromium storage metadata must prove:
+
+```text
+partitionKey.sourceOrigin = https://powgate.test
+partitionKey.hasCrossSiteAncestor = false
+domain = gate.powgate.test
+path = /
+secure = true
+httpOnly = false
+sameSite = Lax
+session = true
+expires = -1
+```
+
+The absent Domain attribute, applicability to the challenge origin, and
+non-applicability to `https://powgate.test/` through the browser cookie API
+jointly prove host-only scope. An opaque partition key or a representation that
+does not expose the structured source origin fails this pinned-environment
+contract. No assertion is weakened to accept an ambiguous normalized value.
+
 ## Mandatory state and terminal behavior
 
 Before production cleanup, each case proves:
@@ -65,18 +93,26 @@ The terminal state requires:
 ```text
 namespace_assignments = 1
 solver_calls = 0
-navigation_count = 1
+challenge_phase_document_navigation_count = 1
 backend_count = 0
-replacement_proof_count = 0
+original_partitioned_proof_count = 1
+new_partitioned_proof_count = 0
+unpartitioned_proof_count = 0
 auth_cookie_count = 0
 failure_ui_visible = true
 retry_control_visible = true
 ```
 
+The original partitioned cookie is checked transiently for exact equality with
+the fixture value but the value is never retained. Cookie inspection covers
+all exact-name proof and configured auth cookies applicable to the challenge
+origin and current partition context. It proves that no second partitioned,
+unpartitioned host-only, or differently scoped exact-name proof cookie exists.
+
 During the fixed fail-closed quiet window, the URL remains unchanged and no
-second document request, automatic retry, solver call, proof/auth cookie
-mutation, backend request, console event, page error, unhandled rejection, CSP
-violation, crash, or unexpected network event occurs.
+second challenge-phase document request, automatic retry, solver call,
+proof/auth cookie mutation, backend request, console event, page error,
+unhandled rejection, CSP violation, crash, or unexpected network event occurs.
 
 ## Observer boundary
 
@@ -102,6 +138,17 @@ equivalence source identity. The focused equivalence contract is a mandatory
 test, so changing either shared export necessarily reruns it before the matrix
 can pass. The mandatory H1/H2 matrix runs the observed negative case and need
 not duplicate the observer-free control on every gate.
+
+The Make dependency is explicit:
+
+```text
+test-browser-e2e
+  -> test-browser-partitioned-observer-equivalence
+  -> permanent browser matrix
+```
+
+The permanent matrix cannot pass after a shared observer or cookie-descriptor
+change without executing the focused control comparison.
 
 ## Mandatory matrix and sanitizer ownership
 

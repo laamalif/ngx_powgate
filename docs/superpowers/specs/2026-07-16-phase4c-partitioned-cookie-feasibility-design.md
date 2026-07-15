@@ -99,6 +99,11 @@ backend_count = 0
 post-cleanup `document.cookie` visibility is insufficient because the
 production controller decides from the page-visible cookie surface.
 
+The seed navigation is completed before the challenge observation cursor is
+created. The historical implementation field named `navigation_count` means
+challenge-phase document navigations only; the permanent contract uses the
+unambiguous `challenge_phase_document_navigation_count` name.
+
 The experimental target reports the complete fixed verdict record and exits
 zero when the experiment executed correctly, regardless of whether the
 acceptance tuple was reached. Environment, fixture, protocol, observer,

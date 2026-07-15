@@ -199,6 +199,7 @@ Existing targets retain their meanings:
 Phase 4C adds:
 
 - `make test-browser-feasibility`;
+- `make test-browser-partitioned-observer-equivalence`;
 - `make test-browser-e2e`;
 - `make benchmark-browser`;
 - `make check-browser-x86`.
@@ -218,6 +219,11 @@ check-browser-x86:
 ```
 
 It never invokes the host wrapper from inside the container.
+
+`test-browser-e2e` has an explicit dependency on
+`test-browser-partitioned-observer-equivalence`. The permanent matrix cannot
+run successfully after an observer or cookie-setup change unless the focused
+observer-free control comparison also runs and passes.
 
 ### Canonical host wrapper
 
@@ -505,6 +511,24 @@ overwrites, repairs, or deletes the cookie. The literal `1.0.0` is a fixture
 value for residual-cookie detection, not a candidate valid proof; the server
 must never accept it. Retained diagnostics contain no raw cookie value.
 
+`/__powgate_partitioned_seed` is an isolated fixture-only endpoint. PowGate
+does not protect it, it cannot reach the protected backend, and it returns
+fixed non-executable content without redirects or external resources. Its
+response emits exactly the intended partitioned `Set-Cookie` and no unrelated
+PowGate cookie. The harness completes and verifies the seed response and
+stored-cookie metadata, then advances every navigation, request, cookie, and
+event observation cursor before beginning the challenge phase. Seed activity
+is excluded from challenge-phase navigation and backend counts.
+
+Pinned Chromium must expose a structured partition key with `sourceOrigin`
+equal to `https://powgate.test` and `hasCrossSiteAncestor` false. Stored-cookie
+metadata must also prove domain `gate.powgate.test`, path `/`, Secure true,
+HttpOnly false, SameSite Lax, session true, and expiry `-1`. Host-only scope is
+proved by the absent Domain attribute, applicability to the challenge origin,
+and non-applicability to `https://powgate.test/` through the browser cookie
+API. An opaque or normalized-away partition key fails the pinned-environment
+contract rather than weakening the assertion.
+
 Before production cleanup, the case proves the cookie is stored, exactly one
 proof occurrence is page-visible through `document.cookie`, and the initial
 request contains one exact proof occurrence according to the production
@@ -529,15 +553,19 @@ The expected terminal result is:
 - partitioned cookie stored, initially visible, and present on the request;
 - partitioned cookie still stored and page-visible after cleanup;
 - namespace assigned exactly once and solver called zero times;
-- exactly one document navigation and zero backend requests;
-- zero replacement proof cookies and zero auth cookies;
+- exactly one challenge-phase document navigation and zero backend requests;
+- exactly one original partitioned proof cookie, transiently equal to the
+  fixture value;
+- zero new partitioned, unpartitioned, or differently scoped exact-name proof
+  cookies and zero auth cookies;
 - static failure UI and retry control visible.
 
 After terminal UI appears, `FAIL_CLOSED_QUIET_WINDOW_MS` requires an unchanged
-URL, no second document request, automatic retry, solver call, proof/auth cookie
-mutation, backend request, console output, page error, unhandled rejection,
-CSP violation, crash, or unexpected network event. Context destruction may
-remove the cookie only after every assertion completes.
+URL, no second challenge-phase document request, automatic retry, solver call,
+proof/auth cookie mutation, backend request, console output, page error,
+unhandled rejection, CSP violation, crash, or unexpected network event.
+Context destruction may remove the cookie only after every assertion
+completes.
 
 The negative matrix is two cases, one per protocol. Phase 4B owns synthetic
 cleanup/serialization cases; Phase 4C owns this browser-native partitioned
