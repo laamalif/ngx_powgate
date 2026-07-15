@@ -1,12 +1,22 @@
 # Phase 4C Partitioned-Cookie Feasibility Spike
 
+## Status
+
+Commit `5b14254` reached the complete acceptance tuple in pinned native
+Chromium. The construction is promoted by
+`2026-07-16-phase4c-partitioned-negative-matrix-amendment.md`; this document is
+retained as the historical feasibility contract and evidence rationale. The
+experimental target remains temporarily available only as a known-good
+comparison point during permanent-matrix implementation.
+
 ## Purpose
 
-This spike determines whether pinned native x86_64 Chromium can naturally
+This spike determined whether pinned native x86_64 Chromium could naturally
 produce a partitioned proof-cookie state that reaches PowGate's browser
-controller fail-closed branch. It is exploratory evidence only. It does not
-change the Phase 4C acceptance matrix, production code, protocol, generated
-challenge bytes, or release gates.
+controller fail-closed branch. It was defined as exploratory evidence and did
+not itself change the Phase 4C acceptance matrix, production code, protocol,
+generated challenge bytes, or release gates. The later reviewed amendment owns
+promotion into the permanent matrix.
 
 The public experimental target is exactly:
 
@@ -97,26 +107,25 @@ reachability result is evidence, not a test failure.
 
 ## Outcome handling
 
-If the tuple is reached, no acceptance target changes automatically. A
-separate reviewed design update may promote one H1 and one H2 case into the
+The tuple was reached by commit `5b14254`. No target changed automatically.
+The separately reviewed amendment promotes one H1 and one H2 case into the
 normal and sanitized browser matrices.
 
-If the tuple is not reached, remove the temporary executable and Make target,
-then document the final coverage boundary:
+The rejected-outcome boundary does not apply because the tuple was reached.
+The authoritative matrix is the amendment's twenty-case normal/sanitized
+boundary.
 
-```text
-Phase 4B: synthetic cleanup and fail-closed controller coverage
-Phase 4C normal: 8 positive browser cases
-Phase 4C ASan+UBSan: 8 positive browser cases
-Total: 16 browser cases
-```
-
-The rationale records both rejected browser-native constructions:
+The final rationale records all three evaluated browser-native constructions:
 
 - a parent-domain cookie may remain in storage while disappearing from
   `document.cookie` after root cleanup;
 - pinned Chromium rejects a path-matching literal-semicolon cookie through
   CDP and normalizes a real HTTPS quoted-semicolon `Path` to `/`.
+- the host-only root Partitioned cookie from the real HTTPS seed response
+  remains stored and page-visible after cleanup and reaches fail-closed before
+  mining.
 
-The spike itself never becomes canonical benchmark evidence and does not
-change `docs/protocol.md`.
+The spike itself never becomes canonical benchmark evidence. It remains
+outside `check-browser-x86` until the permanent H1/H2 cases pass under normal
+and sanitized NGINX, then is removed in a separate cleanup commit. Neither the
+spike nor its promotion changes `docs/protocol.md`.

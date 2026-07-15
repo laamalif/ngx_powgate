@@ -19,6 +19,12 @@ and plan. The feasibility check becomes one permanent layer of the Phase 4C
 gate. It does not supersede `docs/protocol.md`; Phase 4C changes no v1 wire
 format or server verification rule.
 
+The partitioned-cookie amendment at
+`2026-07-16-phase4c-partitioned-negative-matrix-amendment.md` supersedes the
+original Section 7 negative-case construction. This document incorporates
+that amendment so the matrix below is authoritative without cross-document
+interpretation.
+
 ## 1. Scope, invariants, and non-goals
 
 ### Core invariants
@@ -480,42 +486,62 @@ failure UI, retry, disconnect, incomplete navigation, or cleanup escalation.
 
 The positive matrix is eight genuine loops: two protocols times four cases.
 
-## 7. Parent-domain fail-closed matrix
+## 7. Partitioned proof-cookie fail-closed matrix
 
-Each protocol adds one fresh-context negative case. The browser API seeds a
-non-host-only Secure SameSite=Lax `__pow_p`, normalized to domain
-`powgate.test`, path `/`, and applicable to `gate.powgate.test`. Its v1 lexical
-form uses an out-of-window canonical bucket so it cannot accidentally verify.
+Each protocol adds one fresh-context negative case using the exact
+browser-native state demonstrated by commit `5b14254`. An HTTPS seed response
+from `https://gate.powgate.test/__powgate_partitioned_seed` creates:
 
-Before controller cleanup, an observation records only that
-`document.cookie` contains one exact proof occurrence. It retains no cookie
-string. Browser metadata proves non-host-only domain scope regardless of
-whether Chromium displays a historical leading dot.
+```text
+Set-Cookie: __pow_p=1.0.0; Path=/; Secure; SameSite=Lax; Partitioned
+```
 
-Only these negative pages install a pre-document observer. It intercepts the
-single `globalThis.PowGateSolver` assignment and creates a descriptor-compatible
-frozen wrapper with exactly `sha256` and `solve`. `sha256` is unchanged;
-`solve` increments a private count and delegates with `Reflect.apply`, the
-original receiver/arguments, Promise, and error behavior. A missing, repeated,
-or differently shaped namespace assignment fails before interpreting the
-count. Positive and benchmark pages are untouched.
+The seed and protected challenge both run as top-level navigations from
+`https://gate.powgate.test`; the schemeful top-level site and partition key are
+`https://powgate.test`. The cookie has no Domain attribute and is host-only to
+`gate.powgate.test`. It has no HttpOnly, Expires, or Max-Age attribute. Only the
+real HTTPS response may create it. CDP may inspect storage but never creates,
+overwrites, repairs, or deletes the cookie. The literal `1.0.0` is a fixture
+value for residual-cookie detection, not a candidate valid proof; the server
+must never accept it. Retained diagnostics contain no raw cookie value.
+
+Before production cleanup, the case proves the cookie is stored, exactly one
+proof occurrence is page-visible through `document.cookie`, and the initial
+request contains one exact proof occurrence according to the production
+scanner. After cleanup, the same partitioned cookie remains both page-visible
+and present in browser storage. Storage survival without page visibility is
+insufficient.
+
+Only these negative pages install the shared narrow solver observer. One
+implementation is used by the feasibility spike and permanent E2E case. It
+records exactly one namespace assignment and counts `solve()` calls while
+preserving the production descriptor, frozen namespace, exact `sha256` and
+`solve` exports, receiver, arguments, Promise identity/behavior, and errors.
+It performs no cookie, navigation, scheduling, or network mutation. A missing,
+repeated, or differently shaped namespace assignment fails before the count is
+interpreted. A mandatory observer-free equivalence test is tied to the shared
+observer and setup source identity; changing either invalidates equivalence
+until the focused control is rerun. Positive and benchmark pages remain
+untouched.
 
 The expected terminal result is:
 
-- namespace assigned once and solver called zero times;
-- domain cookie unchanged and still page-visible;
-- no host-only proof or auth cookie;
-- static failure UI and retry control visible;
-- no backend request, mining, reload, or second document request;
-- no console/error/CSP/crash event.
+- partitioned cookie stored, initially visible, and present on the request;
+- partitioned cookie still stored and page-visible after cleanup;
+- namespace assigned exactly once and solver called zero times;
+- exactly one document navigation and zero backend requests;
+- zero replacement proof cookies and zero auth cookies;
+- static failure UI and retry control visible.
 
-After terminal UI appears, `FAIL_CLOSED_QUIET_WINDOW_MS` observes unchanged
-URL, zero new document request, zero cookie mutation, zero solver call, and no
-automatic retry action. The context then removes the expected domain cookie.
+After terminal UI appears, `FAIL_CLOSED_QUIET_WINDOW_MS` requires an unchanged
+URL, no second document request, automatic retry, solver call, proof/auth cookie
+mutation, backend request, console output, page error, unhandled rejection,
+CSP violation, crash, or unexpected network event. Context destruction may
+remove the cookie only after every assertion completes.
 
 The negative matrix is two cases, one per protocol. Phase 4B owns synthetic
-path/serialization cases; Phase 4C owns this browser-native undeletable-domain
-case.
+cleanup/serialization cases; Phase 4C owns this browser-native partitioned
+residual-cookie case.
 
 ## 8. Benchmark methodology and responsiveness
 
@@ -838,8 +864,8 @@ object or full raw arrays under the canonical schema/name.
 `test-browser-e2e` executes the complete ten-case matrix twice:
 
 ```text
-normal production build: 8 positive + 2 negative
-ASan+UBSan build:         8 positive + 2 negative
+normal production build: 8 positive + 2 partitioned fail-closed = 10 cases
+ASan+UBSan build:         8 positive + 2 partitioned fail-closed = 10 cases
 total:                    20 browser cases
 ```
 
