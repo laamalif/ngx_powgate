@@ -588,8 +588,8 @@ NGINX
 
         my $log = read_log($runtime);
         like $log,
-            qr/pow_gate: unsupported connection address family \d+,
-               [ ]request[ ]rejected/x,
+            qr/pow_gate:\x20unsupported\x20connection\x20address
+               \x20family\x20\d+,\x20request\x20rejected/x,
             'unsupported family verdict is logged';
         unlike $log, qr/unix-secret-path/, 'Unix URI is not logged';
         unlike $log, qr/header-sentinel/, 'Unix header is not logged';

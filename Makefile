@@ -13,12 +13,15 @@ FUZZ_CFLAGS := $(PURE_CFLAGS) -fsanitize=fuzzer,address,undefined \
 COVERAGE_CFLAGS := $(PURE_CFLAGS) -O0 --coverage
 COVERAGE_LDFLAGS := --coverage
 
-.PHONY: check-policy challenge-page module test-tools test-unit \
+.PHONY: check-policy check-test-env challenge-page module test-tools test-unit \
 	test-vector-python test-fuzz test-fuzz-long test-coverage \
 	test-integration test-e2e asan check clean
 
 check-policy:
 	./tools/check-policy.sh
+
+check-test-env:
+	./tools/check-test-env.sh
 
 $(CHALLENGE_HEADER): html/challenge.html tools/build_pow_challenge.py
 	@mkdir -p $(@D)
@@ -175,16 +178,16 @@ module: $(CHALLENGE_HEADER)
 	$(MAKE) modules; \
 	install -m 0755 objs/ngx_http_pow_module.so /work/$(MODULE)
 
-test-integration: module
+test-integration: check-test-env module
 	TEST_NGINX_BINARY=/usr/sbin/nginx \
 	POW_MODULE_PATH=/work/out/ngx_http_pow_module.so \
 	TEST_NGINX_SERVROOT=/tmp/ngx-powgate-test \
 	prove -Itests/integration/lib -v tests/integration/*.t
 
-test-e2e: module
+test-e2e: check-test-env module
 	node tests/e2e/smoke.mjs
 
-asan: check-policy
+asan: check-policy check-test-env
 	./tools/run-asan.sh
 
 check: check-policy test-tools test-unit test-coverage module test-integration \

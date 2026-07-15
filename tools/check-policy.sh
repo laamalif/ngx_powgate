@@ -79,8 +79,9 @@ if [ -n "$pure_headers" ]; then
         && violation "non-C99 or external include in pure-core header" "$hits"
 fi
 
-# 5. RNG (hard rule 7); the design needs no randomness anywhere — if that
-#    ever changes, this line is edited in the same commit as the rationale
+# 5. RNG (hard rule 7); production code needs no randomness. Ephemeral TLS
+#    certificate generation under tests/ is the sole test-only exception;
+#    this src/-only scan remains unchanged if that fixture changes.
 hits=$(grep -En \
     '(^|[^A-Za-z0-9_])(rand|random|srand|srandom|drand48|RAND_bytes)[[:space:]]*\(' \
     $all_files)
