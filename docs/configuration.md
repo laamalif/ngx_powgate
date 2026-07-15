@@ -11,7 +11,7 @@ verification arrive in Phase 4.
 | `pow on\|off` | `http`, `server`, `location` | `off` | `on` or `off` |
 | `pow_difficulty N` | `http`, `server`, `location` | `20` | Integer from 1 through 32 |
 | `pow_challenge_window time` | `http`, `server`, `location` | `60s` | Positive NGINX time value resolved to whole seconds |
-| `pow_cookie_name token` | `http`, `server`, `location` | `__pow` | 1 through 64 ASCII token bytes; must not begin with `$` |
+| `pow_cookie_name token` | `http`, `server`, `location` | `__pow` | 1 through 64 ASCII token bytes; must not begin with `$` or equal reserved `__pow_p` |
 | `pow_cookie_ttl time` | `http`, `server`, `location` | `1h` | NGINX time value at least as large as the effective `pow_challenge_window` |
 | `pow_cookie_secure on\|off` | `http`, `server`, `location` | `on` | `on` or `off` |
 | `pow_secret_file path` | `http` only | none | One regular secret file; may appear only once |
@@ -100,8 +100,11 @@ punctuation bytes:
 Whitespace, control and non-ASCII bytes, and token separators are rejected.
 The first byte may not be `$`; `$` is allowed later in the name. This setting
 renames only the authentication cookie. The proof-cookie name `__pow_p` is
-fixed by protocol and has no configuration channel. Cookie names are not MAC
-inputs.
+fixed by protocol and has no configuration channel, so the exact
+case-sensitive name `__pow_p` is reserved and rejected as an auth-cookie
+name. Case variants such as `__POW_P` remain valid when they satisfy the
+normal token grammar and do not collide with another reserved protocol name.
+Cookie names are not MAC inputs.
 
 `pow_cookie_secure` defaults to `on`. Setting it to `off` is an explicit,
 non-default development-only opt-out that will omit only the authentication

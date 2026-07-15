@@ -286,6 +286,17 @@ ngx_http_pow_valid_cookie_name(ngx_conf_t *cf, void *post, void *data)
         }
     }
 
+    if (name->len == sizeof(POW_PROOF_COOKIE_NAME) - 1
+        && ngx_strncmp(name->data, POW_PROOF_COOKIE_NAME,
+                       name->len) == 0)
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "pow_cookie_name \"%s\" is reserved for the "
+                           "proof cookie", POW_PROOF_COOKIE_NAME);
+
+        return NGX_CONF_ERROR;
+    }
+
     return NGX_CONF_OK;
 
 invalid:
