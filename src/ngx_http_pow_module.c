@@ -13,6 +13,13 @@
 #define NGX_HTTP_POW_ADDR_IPV6  2
 
 
+typedef char  ngx_http_pow_challenge_page_size_check[
+    sizeof(ngx_http_pow_challenge_prefix) + POW_CHALLENGE_JSON_MAX_LEN
+    + sizeof(ngx_http_pow_challenge_suffix)
+    < POW_CHALLENGE_PAGE_MAX_BODY_LEN ? 1 : -1
+];
+
+
 static ngx_int_t ngx_http_pow_handler(ngx_http_request_t *r);
 static ngx_int_t ngx_http_pow_connection_kind(ngx_http_request_t *r,
     ngx_uint_t *kind);
@@ -426,12 +433,6 @@ ngx_http_pow_issue_html(ngx_http_request_t *r, const uint8_t *challenge,
     ngx_table_elt_t  *csp_header;
     ngx_table_elt_t  *robots;
 
-    challenge_value = ngx_pnalloc(r->pool, challenge_text->len);
-    if (challenge_value == NULL) {
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
-    }
-    ngx_memcpy(challenge_value, challenge, challenge_text->len);
-
     json_len = sizeof(POW_CHALLENGE_JSON_PREFIX) - 1
                + challenge_text->difficulty_len
                + sizeof(POW_CHALLENGE_JSON_BUCKET_PREFIX) - 1
@@ -439,6 +440,22 @@ ngx_http_pow_issue_html(ngx_http_request_t *r, const uint8_t *challenge,
                + sizeof(POW_CHALLENGE_JSON_NONCE_PREFIX) - 1
                + challenge_text->nonce_len
                + sizeof(POW_CHALLENGE_JSON_SUFFIX) - 1;
+
+    if (pow_challenge_body_len(ngx_http_pow_challenge_prefix_len, json_len,
+                               ngx_http_pow_challenge_suffix_len,
+                               &body_len) != 1)
+    {
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                      "pow_gate: operation=challenge_body verdict=failed");
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    challenge_value = ngx_pnalloc(r->pool, challenge_text->len);
+    if (challenge_value == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+    ngx_memcpy(challenge_value, challenge, challenge_text->len);
+
     json = ngx_pnalloc(r->pool, json_len);
     if (json == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -533,8 +550,6 @@ ngx_http_pow_issue_html(ngx_http_request_t *r, const uint8_t *challenge,
     chain[2]->buf = body[2];
     chain[2]->next = NULL;
 
-    body_len = ngx_http_pow_challenge_prefix_len + json_len
-               + ngx_http_pow_challenge_suffix_len;
     r->headers_out.status = NGX_HTTP_SERVICE_UNAVAILABLE;
     ngx_str_set(&r->headers_out.content_type, POW_HTML_CONTENT_TYPE);
     r->headers_out.content_type_len = r->headers_out.content_type.len;

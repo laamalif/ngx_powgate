@@ -34,6 +34,8 @@ void pow_ip16_from_ipv6(const uint8_t ipv6[POW_IP_LEN],
     uint8_t out[POW_IP_LEN]);
 int pow_ip16_mask(uint8_t ip16[POW_IP_LEN], uint8_t plen);
 int pow_bucket_within_skew(uint64_t claimed, uint64_t current);
+int pow_challenge_body_len(size_t prefix_len, size_t json_len,
+    size_t suffix_len, size_t *out);
 int pow_challenge_derive(const uint8_t secret[POW_SECRET_LEN],
     const uint8_t ip16[POW_IP_LEN], uint8_t plen, uint64_t bucket,
     uint8_t nonce[POW_NONCE_LEN]);

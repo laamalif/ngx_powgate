@@ -101,6 +101,34 @@ pow_bucket_within_skew(uint64_t claimed, uint64_t current)
 
 
 int
+pow_challenge_body_len(size_t prefix_len, size_t json_len,
+    size_t suffix_len, size_t *out)
+{
+    size_t  remaining;
+
+    if (out == NULL || prefix_len >= POW_CHALLENGE_PAGE_MAX_BODY_LEN) {
+        return 0;
+    }
+
+    remaining = POW_CHALLENGE_PAGE_MAX_BODY_LEN - prefix_len;
+
+    if (json_len >= remaining) {
+        return 0;
+    }
+
+    remaining -= json_len;
+
+    if (suffix_len >= remaining) {
+        return 0;
+    }
+
+    *out = prefix_len + json_len + suffix_len;
+
+    return 1;
+}
+
+
+int
 pow_challenge_derive(const uint8_t secret[POW_SECRET_LEN],
     const uint8_t ip16[POW_IP_LEN], uint8_t plen, uint64_t bucket,
     uint8_t nonce[POW_NONCE_LEN])
