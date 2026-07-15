@@ -975,7 +975,13 @@ through the same curl invocation. Assert the second transfer has
 `num_connects == 0`, uses the same local port, negotiates the requested
 protocol, and receives a complete response. Add H1 chunked upload, H2 data
 body, and `Expect: 100-continue`; each must complete within the helper's five
-second deadline and leave the connection/session reusable.
+second deadline. Fixed-length and chunked H1 requests and all H2 streams must
+leave the connection/session reusable. For H1 `Expect`, NGINX's standard
+discard path sends the final challenge immediately after `100 Continue`;
+curl consequently aborts its pending upload and reconnects. Assert that the
+server advertised keepalive and that the second request completes on exactly
+one new connection rather than misclassifying this client behavior as a
+server-side reuse failure.
 
 - [ ] **Step 2: Add response override and metadata tests**
 
