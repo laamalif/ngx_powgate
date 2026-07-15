@@ -7,13 +7,13 @@ use IO::Socket::INET;
 use Time::HiRes qw(CLOCK_MONOTONIC clock_gettime sleep);
 use Test::More;
 
+use PowGate::TestHTTPS qw(generate_tls_fixture https_request);
 use PowGate::TestNginx qw(
     atomic_write
     nginx_child_pids
     signal_nginx
     start_nginx
     stop_nginx
-    wait_for_http
     write_file
 );
 
@@ -176,6 +176,7 @@ subtest 'occupied port retries with a fresh runtime attempt' => sub {
     my @attempts;
     my $listener;
     my $retry_runtime;
+    my $retry_tls;
     my $error;
 
     eval {
@@ -184,11 +185,15 @@ subtest 'occupied port retries with a fresh runtime attempt' => sub {
                 my ($prefix, $port) = @_;
 
                 push @attempts, [$prefix, $port];
+                $retry_tls = generate_tls_fixture($prefix);
 
                 return <<"NGINX";
     server {
-        listen 127.0.0.1:$port;
-        location / { return 200 "retry\\n"; }
+        listen 127.0.0.1:$port ssl;
+        http2 on;
+        ssl_certificate $retry_tls->{certificate};
+        ssl_certificate_key $retry_tls->{key};
+        location / { pow off; return 200 "retry\\n"; }
     }
 NGINX
             },
@@ -210,10 +215,19 @@ NGINX
             },
         );
 
-        my $response = wait_for_http($retry_runtime, '/', 5);
+        for my $protocol ('1.1', '2') {
+            my $response = https_request(
+                $retry_runtime,
+                protocol => $protocol,
+                method => 'GET',
+                path => '/',
+            );
 
-        like $response, qr{\AHTTP/1\.[01] 200\b},
-            'retry runtime owns and serves its selected port';
+            is $response->{status}, 200,
+                "retry runtime serves HTTPS $protocol";
+            is $response->{protocol}, $protocol,
+                "retry runtime negotiates $protocol";
+        }
     };
     $error = $@;
 
@@ -361,6 +375,7 @@ PERL
 
 
 my $error;
+my $tls;
 
 eval {
     $runtime = start_nginx(
@@ -368,15 +383,19 @@ eval {
             my ($prefix, $port) = @_;
 
             atomic_write("$prefix/conf/pow.secret", $current, 0600);
+            $tls = generate_tls_fixture($prefix);
 
             return <<"NGINX";
     pow_secret_file pow.secret;
 
     server {
-        listen 127.0.0.1:$port;
+        listen 127.0.0.1:$port ssl;
+        http2 on;
+        ssl_certificate $tls->{certificate};
+        ssl_certificate_key $tls->{key};
 
         location / {
-            pow on;
+            pow off;
             return 200 "backend\\n";
         }
     }
@@ -384,10 +403,19 @@ NGINX
         },
     );
 
-    my $response = wait_for_http($runtime, '/', 5);
+    for my $protocol ('1.1', '2') {
+        my $response = https_request(
+            $runtime,
+            protocol => $protocol,
+            method => 'GET',
+            path => '/',
+        );
 
-    like $response, qr{\AHTTP/1\.[01] 200\b},
-        'initial worker serves the fixed endpoint';
+        is $response->{status}, 200,
+            "initial worker serves HTTPS $protocol";
+        is $response->{protocol}, $protocol,
+            "initial worker negotiates $protocol";
+    }
 
     my $initial_workers = wait_until(
         sub {
@@ -427,9 +455,19 @@ NGINX
     unlike $invalid_event, qr/\Q$current\E|\Q$next\E/,
         'valid secret content is not logged';
 
-    $response = wait_for_http($runtime, '/', 5);
-    like $response, qr{\AHTTP/1\.[01] 200\b},
-        'invalid reload leaves the old cycle serving';
+    for my $protocol ('1.1', '2') {
+        my $response = https_request(
+            $runtime,
+            protocol => $protocol,
+            method => 'GET',
+            path => '/',
+        );
+
+        is $response->{status}, 200,
+            "invalid reload leaves HTTPS $protocol serving";
+        is $response->{protocol}, $protocol,
+            "invalid reload still negotiates $protocol";
+    }
 
     my $after_invalid = nginx_child_pids($runtime);
     my $old_worker_survives = 0;
@@ -464,9 +502,19 @@ NGINX
     ok $new_workers && @$new_workers,
         'valid reload creates a new worker process';
 
-    $response = wait_for_http($runtime, '/', 5);
-    like $response, qr{\AHTTP/1\.[01] 200\b},
-        'valid reload preserves the fixed endpoint';
+    for my $protocol ('1.1', '2') {
+        my $response = https_request(
+            $runtime,
+            protocol => $protocol,
+            method => 'GET',
+            path => '/',
+        );
+
+        is $response->{status}, 200,
+            "valid reload preserves HTTPS $protocol";
+        is $response->{protocol}, $protocol,
+            "valid reload negotiates $protocol";
+    }
 };
 $error = $@;
 

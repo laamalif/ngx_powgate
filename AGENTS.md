@@ -168,8 +168,11 @@ the same commit that introduces any new rule.
    as specified in `docs/protocol.md`. Never build a MAC input by
    concatenating variable-length strings.
 7. **No crypto is vendored.** SHA-256 and HMAC come from the OpenSSL that
-   NGINX links. No RNG anywhere (the design needs none); if one is ever
-   added it is `RAND_bytes`.
+   NGINX links. Production and protocol code use no RNG (the design needs
+   none); if one is ever added it is `RAND_bytes`. The sole exception is
+   ephemeral self-signed TLS certificate generation in test infrastructure;
+   those random bytes must never enter a PowGate secret, nonce, challenge,
+   cookie, or production path.
 8. **Access handler returns `NGX_DECLINED` for allowed requests**, never
    `NGX_OK` (composes with `satisfy`/`allow`/`deny`). Challenge responses
    finalize the request and return `NGX_DONE`.
@@ -182,6 +185,17 @@ the same commit that introduces any new rule.
     TODO or an old comment: CAPTCHA, fingerprinting of any kind, TLS/JA3,
     ML scoring, reputation feeds, external API calls, crawler allowlists,
     JS obfuscation, challenge/session storage.
+12. **Beginning with Phase 3, request integration is HTTPS-only.** Every
+    implemented request-behavior scenario runs over both explicitly asserted
+    HTTP/1.1 and HTTP/2. Tests generate an isolated self-signed
+    certificate/key inside the runtime prefix and may disable certificate
+    verification only in test clients. Never add a production TLS bypass or
+    machine-wide test CA.
+13. **Build responses transactionally.** Derive and validate values, allocate
+    every buffer and header slot, initialize reserved headers with `hash = 0`,
+    and commit headers only when the response is complete. A request has
+    exactly one terminal outcome: `NGX_DECLINED`, an explicitly finalized
+    `NGX_DONE`, or an NGINX error-response path. Never finalize twice.
 
 ## Code conventions
 
@@ -247,6 +261,11 @@ the same commit that introduces any new rule.
   permissions and ownership are intentionally unrestricted.
 - Exempt paths match normalized, percent-decoded `r->uri`, never `r->args`;
   `/` matches all, otherwise require an exact match or a `/` segment boundary.
+- Exempt CIDRs are matched with NGINX's `ngx_cidr_match()` after RealIP
+  processing. Do not add a project-local CIDR matcher.
+- PowGate v1 binds identity only for IPv4 and IPv6. An unsupported connection
+  address family fails closed with `500`; never synthesize an address, treat
+  it as internal, or bypass protection.
 - If either `Set-Cookie` allocation after a valid proof fails, return
   `NGX_HTTP_INTERNAL_SERVER_ERROR`; never pass the request through cookieless.
 - The `pow_parse`, `pow_crypto`, `pow_cookie`, and `pow_challenge` source and

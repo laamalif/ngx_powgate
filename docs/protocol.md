@@ -98,20 +98,26 @@ unless deployment measurements justify another value.
 
 Navigational request — `GET`/`HEAD` with `Accept` containing `text/html`
 (case-insensitive substring match; an absent `Accept` header is
-non-navigational):
+non-navigational). Repeated `Accept` fields are scanned in received order;
+the request is navigational when any field contains the substring:
 
 ```
 HTTP/1.1 503 Service Unavailable
 Content-Type: text/html; charset=utf-8
 Cache-Control: no-store
 X-Robots-Tag: noindex
-Content-Security-Policy: default-src 'none'; script-src 'sha256-<H>';
-                         style-src 'unsafe-inline'
+Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-<H>'; style-src 'unsafe-inline'
 ```
-Body: challenge parameters in a **non-executable JSON data block**
+The CSP is a versioned PowGate protocol constant. `<H>` is replaced by the
+44-byte padded standard-base64 SHA-256 digest of the exact executable script
+body. Any policy change requires an explicit protocol revision.
+
+Body: challenge parameters inserted at the template marker as a
+**non-executable JSON data block**
 (`<script type="application/json" id="pow-params">{"v":1,"d":<int>,
-"b":"<bucket decimal>","n":"<nonce b64url>"}</script>`) followed by the
-static challenge page, whose single executable `<script>` never varies.
+"b":"<bucket decimal>","n":"<nonce b64url>"}</script>`). Every other byte
+comes from the static challenge page, whose single executable `<script>`
+never varies.
 Every value inserted into the JSON block matches `[0-9A-Za-z_-]+` — no
 quotes, no `<` — so `</script` can never appear inside the block and no
 escaping is applied; any future field must preserve this property or the
@@ -133,6 +139,11 @@ PowGate-Challenge: v=1; d=<int>; b=<bucket>; n=<nonce b64url>
 (Header emitted in v0.1; header-based proof acceptance is v0.2.)
 Header serialization is fixed: exactly these four keys, in this order,
 separated by `"; "` (semicolon, one space); duplicate keys never occur.
+
+PowGate v1 derives client identity only from IPv4 and IPv6 connection
+addresses after RealIP processing. Requests on any other address family are
+rejected with `500`; they are never treated as exempt and no synthetic
+address is used.
 
 ## Proof submission — proof cookie `__pow_p`
 

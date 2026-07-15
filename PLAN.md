@@ -354,67 +354,59 @@ HTML challenge for navigations, bare 403 otherwise. No verification yet.
 
 Tasks:
 
-1. Access handler (`ngx_http_pow_module.c`) real skeleton:
-   - Bail `NGX_DECLINED` if: module off, `r != r->main`, `r->internal`,
-     exempt path, exempt CIDR
-     (`r->connection->sockaddr`, post-realip).
-     Matching uses nginx's normalized, percent-decoded `r->uri`; `r->args` is
-     never considered. An exempt path must start with `/` and may not end in
-     `/` except `/`. It matches `/` universally; otherwise it matches only an
-     exact URI or a URI beginning with `path + "/"` (so `/api` never exempts
-     `/apiv2`). Consequently `/static/../admin` is evaluated as `/admin`,
-     while `/%73tatic` is evaluated as `/static`. Duplicate-slash compression
-     follows the core `merge_slashes` setting.
-   - Extract canonical ip16 + prefix_len from sockaddr (AF_INET →
-     IPv4-mapped, AF_INET6 direct), mask per config.
-2. Navigation detection: `GET`/`HEAD` **and** `Accept` header contains
-   `text/html` (case-insensitive scan; absent header = non-navigation).
-3. Both challenge branches emit parameters through **one** pure helper —
-   `pow_challenge_serialize(diff, bucket, nonce, buf)` producing the
-   canonical `v=1; d=<diff>; b=<bucket>; n=<nonce_b64u>` field string. The
-   403 header and the HTML preamble are thin wrappers around it; no field
-   format string exists twice in the codebase. (The JS parser is the one
-   unavoidable second implementation; the Phase 4 e2e test is what pins it
-   to the C side.)
-4. Non-navigation branch: `ngx_http_discard_request_body`, respond `403`,
-   `Content-Length: 0`, header
-   `PowGate-Challenge: <serialized fields>`,
-   finalize, return `NGX_DONE`.
-5. Navigation branch: derive challenge via `pow_challenge_derive`, emit
-   `503` with `Cache-Control: no-store`, `X-Robots-Tag: noindex`,
-   `Content-Type: text/html; charset=utf-8`, and ngx_powgate's own
-   `Content-Security-Policy` per protocol.md. `html/challenge.html` contains
-   exactly one `<!-- POW:PARAMS -->` marker. The build tool rejects zero or
-   multiple markers, splits the file into immutable prefix/suffix byte arrays,
-   and extracts the contents of its one executable script. At runtime the
-   body is `prefix || generated JSON data block || suffix`; no other template
-   substitution exists. The CSP hash is the SHA-256 of exactly the extracted
-   script bytes (without `<script>` tags), computed by that same build tool
-   and emitted as a generated C constant. Tests compare served body and CSP
-   hash with the generated artifacts.
-   `r->allow_ranges = 0`, no etag/last-modified. Pattern A from the
-   implementation checklist (send_header → output_filter → finalize →
-   `NGX_DONE`). Document in `configuration.md`: operator `add_header`
-   CSP applies to module responses too and policies intersect — publish
-   the solver hash so strict-CSP sites can allowlist it.
-6. Embed `html/challenge.html` at build time (Makefile step converts it to
-   a static `u_char` array header via a script checked into `tools/`).
-   This follows nginx's own precedent — built-in error pages are embedded
-   byte arrays in `ngx_http_special_response.c`. Placeholder page for now:
-   static text and the required unique marker, no solver yet. (Operator
-   customization of the page is
-   deliberately deferred: the nginx-idiomatic route is exposing challenge
-   params as `$pow_*` variables usable from a custom `error_page`
-   location — that is the v0.2 "NGINX variables" feature. Do not invent a
-   template mechanism in v0.1.)
-7. Integration tests: no cookie + browser Accept → 503 with exact headers
-   and preamble fields present; curl (no Accept: text/html) → 403 with
-   challenge header; POST with body → 403, connection reusable afterwards
-   (body discarded); exempt `/api` → 200 while `/apiv2` challenges; query
-   strings do not affect exemption; normalized `/static/../admin` is not
-   exempt while `/%73tatic` is; exempt path/CIDR → 200; HEAD → 503 headers, empty
-   body; subrequest via SSI does not challenge; `error_page` hop does not
-   challenge; H2 equivalents of all of the above.
+1. Request evaluation follows one fixed order: skip subrequests and internal
+   redirects; decline if disabled; classify the post-RealIP connection
+   address; reject unsupported families with `500`; match IP exemptions with
+   nginx's `ngx_cidr_match()`; then match path exemptions against normalized,
+   percent-decoded `r->uri`. `/` matches all; another configured path requires
+   an exact match or a `/` segment boundary. Queries never participate and
+   duplicate-slash behavior follows `merge_slashes`.
+2. Canonical identity uses IPv4-mapped `ip16` plus
+   `96 + pow_bind_ipv4` for IPv4 and mapped IPv6, or native 16-byte `ip16`
+   plus `pow_bind_ipv6` for IPv6. Mask before deriving anything. Use
+   `ngx_time()` and the positive effective window for the bucket, then derive
+   with the current secret only.
+3. One pure allocation-free serializer emits
+   `v=1; d=<difficulty>; b=<bucket>; n=<nonce-base64url>` and returns the
+   offsets/lengths of the already-formatted difficulty, bucket, and nonce.
+   The bare header uses the complete string; HTML JSON copies those spans.
+   No other decimal/base64 formatter exists on the response path.
+4. Navigation is `GET` or `HEAD` plus a case-insensitive `text/html`
+   substring in any received `Accept` occurrence. All other method/header
+   combinations are non-navigation. Both branches discard request bodies
+   through `ngx_http_discard_request_body()` before response commitment.
+5. A non-navigation response is an exact bodyless `403` with one
+   `PowGate-Challenge`. PowGate sends it directly so core special responses
+   and `error_page 403` cannot replace it.
+6. A navigation response is an exact HTML `503` with `Cache-Control:
+   no-store`, `X-Robots-Tag: noindex`, `Content-Type: text/html;
+   charset=utf-8`, and PowGate's named versioned CSP. Ranges, ETag, and
+   Last-Modified are disabled. `HEAD` publishes the GET content length but no
+   body; `error_page 503` cannot replace the completed response.
+7. `html/challenge.html` contains exactly one literal
+   `<!-- POW:PARAMS -->` marker and one inert executable script. The build
+   tool rejects malformed templates, splits exact prefix/suffix bytes,
+   extracts the exact script body, and emits its padded standard-base64
+   SHA-256 digest into the same deterministic generated header. Phase 4B
+   replaces only the inert script body with the solver.
+8. Build responses transactionally: derive and validate values; allocate all
+   buffers; reserve every header with `hash = 0`; populate metadata; enable
+   headers only when complete; send; finalize exactly once; return
+   `NGX_DONE`. Before commitment, any runtime/format/allocation error follows
+   the NGINX error path. Allowed requests return `NGX_DECLINED`.
+9. Every request-behavior scenario runs over HTTPS with both forced HTTP/1.1
+   and HTTP/2 and asserts the negotiated protocol. Each isolated runtime owns
+   an ephemeral self-signed P-256 certificate; only test clients disable
+   verification. Tests cover exact body/header/CSP bytes, deterministic
+   identity and RealIP, IPv4/IPv6/mapped IPv6, Unix fail-closed behavior,
+   normalized paths, reusable connections after bodies, subrequests/internal
+   redirects, error-page resistance, operator CSP intersection, and a strict
+   public-header allowlist.
+10. Normal and ASan/UBSan module builds consume the same generated page.
+    Instrumented NGINX enables `--with-http_ssl_module` and
+    `--with-http_v2_module` and runs the complete production H1/H2 matrix.
+    Normal challenge issuance is not logged; `pow_log_level` remains reserved
+    for Phase 4 verification failures.
 
 **Gate:** `make check` green including all new integration tests, run over
 HTTP/1.1 and HTTP/2. ASan job green.
@@ -553,8 +545,8 @@ Tasks:
 2. `docs/deployment-behind-proxies.md`: realip configuration, exact
    `set_real_ip_from` guidance, the two failure modes (shared LB IP vs
    spoofable XFF), and a copy-paste config for the common CDN cases.
-3. Logging per README: challenge issuance at `info`, verification failures
-   at the severity configured via `pow_log_level` (enum directive,
+3. Logging per README: normal challenge issuance is not logged; verification
+   failures use the severity configured via `pow_log_level` (enum directive,
    `limit_req_log_level` mechanism) with verdict + lengths only, config
    errors via `ngx_conf_log_error`. Debug tracing through
    `ngx_log_debug*(NGX_LOG_DEBUG_HTTP, ...)` so `--with-debug` builds show
@@ -775,20 +767,26 @@ unless deployment measurements justify another value.
 
 Navigational request — `GET`/`HEAD` with `Accept` containing `text/html`
 (case-insensitive substring match; an absent `Accept` header is
-non-navigational):
+non-navigational). Repeated `Accept` fields are scanned in received order;
+the request is navigational when any field contains the substring:
 
 ```
 HTTP/1.1 503 Service Unavailable
 Content-Type: text/html; charset=utf-8
 Cache-Control: no-store
 X-Robots-Tag: noindex
-Content-Security-Policy: default-src 'none'; script-src 'sha256-<H>';
-                         style-src 'unsafe-inline'
+Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; script-src 'sha256-<H>'; style-src 'unsafe-inline'
 ```
-Body: challenge parameters in a **non-executable JSON data block**
+The CSP is a versioned PowGate protocol constant. `<H>` is replaced by the
+44-byte padded standard-base64 SHA-256 digest of the exact executable script
+body. Any policy change requires an explicit protocol revision.
+
+Body: challenge parameters inserted at the template marker as a
+**non-executable JSON data block**
 (`<script type="application/json" id="pow-params">{"v":1,"d":<int>,
-"b":"<bucket decimal>","n":"<nonce b64url>"}</script>`) followed by the
-static challenge page, whose single executable `<script>` never varies.
+"b":"<bucket decimal>","n":"<nonce b64url>"}</script>`). Every other byte
+comes from the static challenge page, whose single executable `<script>`
+never varies.
 Every value inserted into the JSON block matches `[0-9A-Za-z_-]+` — no
 quotes, no `<` — so `</script` can never appear inside the block and no
 escaping is applied; any future field must preserve this property or the
@@ -810,6 +808,11 @@ PowGate-Challenge: v=1; d=<int>; b=<bucket>; n=<nonce b64url>
 (Header emitted in v0.1; header-based proof acceptance is v0.2.)
 Header serialization is fixed: exactly these four keys, in this order,
 separated by `"; "` (semicolon, one space); duplicate keys never occur.
+
+PowGate v1 derives client identity only from IPv4 and IPv6 connection
+addresses after RealIP processing. Requests on any other address family are
+rejected with `500`; they are never treated as exempt and no synthetic
+address is used.
 
 ## Proof submission — proof cookie `__pow_p`
 

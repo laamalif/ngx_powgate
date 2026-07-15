@@ -7,6 +7,9 @@ root=$(pwd)
 
 : "${NGX_SOURCE_DIR:?NGX_SOURCE_DIR must name the pinned NGINX source tree}"
 test -f "$NGX_SOURCE_DIR/src/core/nginx.h"
+NGX_RUNTIME_BINARY=${NGX_RUNTIME_BINARY:-/usr/sbin/nginx} \
+    ./tools/check-test-env.sh
+make challenge-page
 
 work=$(mktemp -d /tmp/ngx-powgate-asan.XXXXXX)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
@@ -37,6 +40,9 @@ cd "$work/nginx"
 CC=clang ./configure \
     --with-compat \
     --with-debug \
+    --with-http_realip_module \
+    --with-http_ssl_module \
+    --with-http_v2_module \
     --with-cc-opt="$sanitizers" \
     --with-ld-opt='-fsanitize=address,undefined' \
     --add-dynamic-module="$root"

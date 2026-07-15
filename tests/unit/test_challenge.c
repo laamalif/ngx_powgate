@@ -33,6 +33,17 @@ copy_bytes(uint8_t *dst, const uint8_t *src, size_t len)
 }
 
 
+static void
+fill_bytes(uint8_t *dst, uint8_t value, size_t len)
+{
+    size_t  i;
+
+    for (i = 0; i < len; i++) {
+        dst[i] = value;
+    }
+}
+
+
 static int
 test_ip_mapping(void)
 {
@@ -191,6 +202,86 @@ test_nonce_and_proof(void)
 
 
 static int
+test_challenge_serialize(void)
+{
+    static const struct {
+        uint8_t      difficulty;
+        uint64_t     bucket;
+        const char  *wire;
+        size_t       wire_len;
+        size_t       difficulty_offset;
+        size_t       difficulty_len;
+        size_t       bucket_offset;
+        size_t       bucket_len;
+        size_t       nonce_offset;
+    } cases[] = {
+        {
+            1, UINT64_C(0),
+            "v=1; d=1; b=0; n="
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            sizeof("v=1; d=1; b=0; n="
+                   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") - 1,
+            7, 1, 12, 1, 17
+        },
+        {
+            20, UINT64_C(29333333),
+            "v=1; d=20; b=29333333; n="
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            sizeof("v=1; d=20; b=29333333; n="
+                   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") - 1,
+            7, 2, 13, 8, 25
+        },
+        {
+            32, UINT64_MAX,
+            "v=1; d=32; b=18446744073709551615; n="
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            sizeof("v=1; d=32; b=18446744073709551615; n="
+                   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") - 1,
+            7, 2, 13, 20, 37
+        }
+    };
+    uint8_t               buf[POW_CHALLENGE_WIRE_MAX_LEN];
+    uint8_t               nonce[POW_NONCE_LEN] = { 0 };
+    pow_challenge_text_t   text;
+    size_t                 capacity;
+    size_t                 i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        TEST_ASSERT(pow_challenge_serialize(cases[i].difficulty,
+                    cases[i].bucket, nonce, buf, sizeof(buf), &text) == 1);
+        TEST_ASSERT(text.len == cases[i].wire_len);
+        TEST_ASSERT(bytes_equal(buf, (const uint8_t *) cases[i].wire,
+                                text.len) == 1);
+        TEST_ASSERT(text.difficulty_offset == cases[i].difficulty_offset);
+        TEST_ASSERT(text.difficulty_len == cases[i].difficulty_len);
+        TEST_ASSERT(text.bucket_offset == cases[i].bucket_offset);
+        TEST_ASSERT(text.bucket_len == cases[i].bucket_len);
+        TEST_ASSERT(text.nonce_offset == cases[i].nonce_offset);
+        TEST_ASSERT(text.nonce_len == POW_NONCE_B64URL_LEN);
+
+        for (capacity = 0; capacity < cases[i].wire_len; capacity++) {
+            fill_bytes((uint8_t *) &text, 0xa5, sizeof(text));
+            TEST_ASSERT(pow_challenge_serialize(cases[i].difficulty,
+                        cases[i].bucket, nonce, buf, capacity, &text) == 0);
+        }
+    }
+
+    TEST_ASSERT(pow_challenge_serialize(0, 0, nonce, buf, sizeof(buf),
+                                        &text) == 0);
+    TEST_ASSERT(pow_challenge_serialize(33, 0, nonce, buf, sizeof(buf),
+                                        &text) == 0);
+    TEST_ASSERT(pow_challenge_serialize(20, 0, NULL, buf, sizeof(buf),
+                                        &text) == 0);
+    TEST_ASSERT(pow_challenge_serialize(20, 0, nonce, NULL, sizeof(buf),
+                                        &text) == 0);
+    TEST_ASSERT(pow_challenge_serialize(20, 0, nonce, buf, sizeof(buf),
+                                        NULL) == 0);
+
+    return 0;
+}
+
+
+static int
 test_proof_parse_valid(void)
 {
     static const uint8_t  ordinary[] = "1.29333333.34";
@@ -267,6 +358,7 @@ main(void)
     TEST_ASSERT(test_ip_masking() == 0);
     TEST_ASSERT(test_bucket_skew() == 0);
     TEST_ASSERT(test_nonce_and_proof() == 0);
+    TEST_ASSERT(test_challenge_serialize() == 0);
     TEST_ASSERT(test_proof_parse_valid() == 0);
     TEST_ASSERT(test_proof_parse_reject() == 0);
 

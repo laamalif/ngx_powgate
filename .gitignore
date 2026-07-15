@@ -24,3 +24,5 @@ build/
 *.profdata
 *.log
 *.tmp
+__pycache__/
+*.pyc
