@@ -71,6 +71,32 @@ function expectedDigest(bytes) {
 }
 
 
+function countedTypedArray(Base, name, records) {
+    return class extends Base {
+        constructor(...args) {
+            super(...args);
+            records.push({ name, length: this.length });
+        }
+    };
+}
+
+
+function allocationMultiset(records) {
+    return records.map(({ name, length }) => `${name}:${length}`).sort();
+}
+
+
+function assertNoDifficulty32Winner(nonce, startCounter, attempts) {
+    for (let offset = 0; offset < attempts; offset++) {
+        const counter = Buffer.from(String(startCounter + offset), 'ascii');
+        const digest = expectedDigest(Buffer.concat([nonce, counter]));
+
+        assert.notEqual(digest.readUInt32BE(0), 0,
+            `independent fixture unexpectedly wins at ${startCounter + offset}`);
+    }
+}
+
+
 function resultValues(result) {
     return {
         found: result.found,
@@ -96,14 +122,24 @@ test('installs the exact frozen two-function namespace', async () => {
 test('generator hashes the exact executable production bytes', async () => {
     const script = await readChallengeScript();
     const artifacts = await buildChallengeArtifacts();
+    const constants = await readProtocolConstants();
     const reconstructed = Buffer.concat([
         artifacts.prefix,
         artifacts.suffix
     ]);
+    const maximumJson = Buffer.from(
+        '<script type="application/json" id="pow-params">'
+        + '{"v":1,"d":32,"b":"99999999999999999999",'
+        + '"n":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}'
+        + '</script>',
+        'ascii'
+    );
 
     assert.deepEqual(extractExecutableScript(reconstructed), script);
     assert.equal(artifacts.digest.toString('ascii'),
         createHash('sha256').update(script).digest('base64'));
+    assert.ok(artifacts.prefix.length + maximumJson.length
+        + artifacts.suffix.length < constants.pageMaxBodyLen);
 });
 
 
@@ -143,7 +179,94 @@ test('sha256 matches fixed messages and padding boundaries', async () => {
         assert.equal(first.length, 32);
         assert.notEqual(first, second);
         assert.deepEqual(first, second);
+        first[0] ^= 0xff;
+        assert.deepEqual(Buffer.from(second), expectedDigest(bytes));
+        assert.deepEqual(Buffer.from(solver.sha256(bytes)),
+            expectedDigest(bytes));
     }
+});
+
+
+test('specialized JS proof path has the KAT difficulty boundary',
+    async () => {
+        const vector = JSON.parse(await fs.readFile(
+            path.join(root, 'tests', 'vectors', 'v1.json'), 'utf8'));
+        const nonce = new Uint8Array(Buffer.from(
+            vector.cases[0].nonce_hex, 'hex'));
+        const solver = await loadSolver();
+
+        for (const difficulty of [8, 10]) {
+            assert.deepEqual(resultValues(await solver.solve(
+                nonce, difficulty, 34, 1, 'js')), {
+                found: true,
+                exhausted: false,
+                counter: 34,
+                nextCounter: null,
+                attempts: 1
+            });
+        }
+
+        assert.deepEqual(resultValues(await solver.solve(
+            nonce, 11, 34, 1, 'js')), {
+            found: false,
+            exhausted: false,
+            counter: null,
+            nextCounter: 35,
+            attempts: 1
+        });
+    });
+
+
+test('JS typed-array allocation is constant per bounded solve', async () => {
+    const records = [];
+    const Uint8 = countedTypedArray(Uint8Array, 'u8', records);
+    const Uint32 = countedTypedArray(Uint32Array, 'u32', records);
+    const script = await readChallengeScript();
+    const context = evaluateChallengeScript(script, {
+        Uint8Array: Uint8,
+        Uint32Array: Uint32
+    });
+    const nonce = new Uint8(32);
+
+    assertNoDifficulty32Winner(Buffer.alloc(32), 0, 1000);
+
+    const deltas = [];
+    for (const maxAttempts of [1, 10, 1000]) {
+        const before = records.length;
+        const result = await context.PowGateSolver.solve(
+            nonce, 32, 0, maxAttempts, 'js');
+
+        assert.equal(result.found, false);
+        assert.equal(result.attempts, maxAttempts);
+        const delta = records.slice(before);
+        assert.deepEqual(delta[0], { name: 'u8', length: 32 });
+        deltas.push(allocationMultiset(delta));
+    }
+
+    /* This is the accepted implementation layout, not a public API. */
+    assert.deepEqual(deltas[0], [
+        'u32:64', 'u32:8', 'u8:16', 'u8:32', 'u8:64'
+    ]);
+    assert.deepEqual(deltas[1], deltas[0]);
+    assert.deepEqual(deltas[2], deltas[0]);
+});
+
+
+test('separate JS solve calls own separate workspaces', async () => {
+    const solver = await loadSolver();
+    const nonceA = new Uint8Array(32);
+    const nonceB = new Uint8Array(32).fill(0xa5);
+    const expectedA = resultValues(await solver.solve(nonceA, 32, 3, 7,
+        'js'));
+    const expectedB = resultValues(await solver.solve(nonceB, 32, 19, 5,
+        'js'));
+    const [actualA, actualB] = await Promise.all([
+        solver.solve(nonceA, 32, 3, 7, 'js'),
+        solver.solve(nonceB, 32, 19, 5, 'js')
+    ]);
+
+    assert.deepEqual(resultValues(actualA), expectedA);
+    assert.deepEqual(resultValues(actualB), expectedB);
 });
 
 
