@@ -1,8 +1,8 @@
 # PowGate configuration
 
-PowGate implements configuration, secret loading, runtime exemptions, and
-deterministic challenge issuance through Phase 3. Cookie and proof
-verification arrive in Phase 4.
+PowGate implements configuration, secret loading, runtime exemptions,
+deterministic challenge issuance, and server-side cookie/proof verification
+through Phase 4A. The browser solver arrives in Phase 4B.
 
 ## Directives
 
@@ -25,10 +25,13 @@ Difficulty 20 is the default. Values from 20 through 22 are recommended;
 measure the solver experience on representative client hardware before using
 another value.
 
-`pow_log_level` is parsed and inherited in Phase 2. It will set the severity
-of request-time verification failures when that logging behavior is added.
-Configuration errors are logged at NGINX's `emerg` level. A CIDR with nonzero
-host bits is accepted after NGINX normalizes it and produces a `warn` message.
+`pow_log_level` sets the severity of bounded client-invalid verification
+summaries. A request can produce at most one auth summary and one proof
+summary; records contain fixed verdicts plus an occurrence count or value
+length, never artifact bytes. Internal/provider failures always use
+`NGX_LOG_ERR` and are not affected by this directive. Configuration errors
+use NGINX's `emerg` level. A CIDR with nonzero host bits is accepted after
+NGINX normalizes it and produces a `warn` message.
 
 ## Inheritance
 
@@ -72,9 +75,10 @@ HEX64 LF HEX64 LF
 
 `LF` is one byte, `0x0A`. CRLF, other whitespace, byte-order marks, blank
 lines, non-hexadecimal bytes, and extra bytes are rejected. The first line is
-the current secret. In the later challenge and verification phases it derives
-and signs new artifacts. The optional second line is the previous secret and
-is verification-only.
+the current secret: it derives challenges, verifies first, and signs every new
+authentication cookie. The optional second line is the previous secret and is
+verification-only. A proof falls back to it only after an invalid
+current-secret check; an internal error never triggers fallback.
 
 The opened target must be a regular file and must have no group or other mode
 bits: `(mode & 0077) == 0`. Symlinks are followed and the resulting target is
@@ -107,9 +111,26 @@ normal token grammar and do not collide with another reserved protocol name.
 Cookie names are not MAC inputs.
 
 `pow_cookie_secure` defaults to `on`. Setting it to `off` is an explicit,
-non-default development-only opt-out that will omit only the authentication
-cookie's `Secure` attribute once cookie issuance is implemented. PowGate never
-infers this setting from the request scheme.
+non-default development-only opt-out that omits only the authentication
+cookie's `Secure` attribute. PowGate never infers this setting from the
+request scheme.
+
+## Verification behavior
+
+Cookie fields are scanned in effective receipt order with exact,
+case-sensitive names. PowGate tries at most the first four configured auth
+cookie occurrences. If none verifies, a separate scan evaluates only the
+first exact `__pow_p` occurrence; an invalid first proof shadows later ones.
+
+Proofs use the request's current difficulty and address-binding prefix. Auth
+cookies carry their signed difficulty and prefix and must satisfy the current
+configured floors. A reload may therefore invalidate an in-flight proof or a
+cookie that no longer satisfies tightened policy; no policy history is kept.
+
+A valid proof creates the configured auth cookie and clears `__pow_p` at
+`Path=/`. Both `Set-Cookie` fields are committed together. Any arithmetic,
+cryptographic, allocation, or construction failure returns `500`, emits no
+PowGate cookie, and never passes the request to protected content.
 
 ## Exemptions
 
@@ -143,7 +164,8 @@ listener or any other address family returns `500` before exemptions are
 evaluated. PowGate never invents an address or treats an unknown transport as
 trusted.
 
-Every non-exempt request receives a deterministic `PowGate-Challenge` header.
+Every non-exempt request without a valid auth cookie or proof receives a
+deterministic `PowGate-Challenge` header.
 A GET or HEAD request is treated as browser navigation when any received
 `Accept` field contains `text/html`, case-insensitively. Navigations receive
 an exact HTML `503`; every other method/media-type combination receives an
@@ -163,7 +185,7 @@ Deploy the challenge endpoint over HTTPS. Test-only clients disable
 certificate verification solely for their ephemeral self-signed fixtures;
 the production module has no TLS-verification bypass.
 
-## Phase 3 example
+## Phase 4A example
 
 ```nginx
 load_module modules/ngx_http_pow_module.so;
@@ -195,7 +217,7 @@ http {
 }
 ```
 
-This configuration issues deterministic challenges and applies runtime
-exemptions today. Phase 4 adds proof and authentication-cookie verification;
-until then, no client can solve a challenge and pass through an enabled
-location.
+This configuration issues deterministic challenges, verifies independently
+submitted proofs and auth cookies, and passes valid requests to the backend.
+The bundled page remains an inert delivery-pipeline placeholder until the
+Phase 4B browser solver is implemented.

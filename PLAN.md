@@ -416,6 +416,8 @@ HTTP/1.1 and HTTP/2. ASan job green.
 
 ## Phase 4A — Server-side verification path
 
+**Status:** Complete (2026-07-15).
+
 **Goal:** the full server loop verified end-to-end using a *reference
 solver script* — no browser JS yet. This deliberately proves the C side
 against an independent implementation first.
@@ -444,7 +446,8 @@ Tasks:
    at most one auth-invalid and one proof-invalid record per request, with
    fixed operation/verdict tokens and no attacker-controlled bytes. Internal
    failures always use a fixed `NGX_LOG_ERR` record and never contribute to
-   client-invalid summaries.
+   client-invalid summaries. These records use the cycle log so NGINX does
+   not append request-line context.
 6. Exercise the complete forced-HTTPS HTTP/1.1 and HTTP/2 matrix from the
    approved Phase 4A design: success, malformed and policy-invalid artifacts,
    clock window, IPv4/IPv6/RealIP binding, occurrence bounds and ordering,

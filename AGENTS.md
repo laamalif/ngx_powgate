@@ -117,6 +117,7 @@ excluded from release artifacts.
 ```
 make check-policy    # source-policy gate, introduced in Phase 0
 make module          # builds ngx_http_pow_module.so against pinned NGINX source
+make fault-modules   # builds test-only Set-Cookie faults under build/
 make test-integration# Test::Nginx suite against a real nginx binary
 make test-e2e        # node-based solver runs the real challenge JS end-to-end
 
@@ -188,7 +189,8 @@ the same commit that introduces any new rule.
    `r != r->main || r->internal`.
 11. **Never log attacker-controlled bytes verbatim.** Log lengths and
     verdicts. Never log the secret, a MAC, or a full cookie value at any
-    level.
+    level. Verification summaries use `ngx_cycle->log`; a request/connection
+    log automatically appends request context and violates this contract.
 12. **Out of scope, permanently** — do not implement even if asked by a
     TODO or an old comment: CAPTCHA, fingerprinting of any kind, TLS/JA3,
     ML scoring, reputation feeds, external API calls, crawler allowlists,
@@ -276,6 +278,8 @@ the same commit that introduces any new rule.
   it as internal, or bypass protection.
 - If either `Set-Cookie` allocation after a valid proof fails, return
   `NGX_HTTP_INTERNAL_SERVER_ERROR`; never pass the request through cookieless.
+- Fault variants are built only under `build/`; no fault-named artifact may
+  enter `out/`, packaging inputs, or release checks.
 - The `pow_parse`, `pow_crypto`, `pow_cookie_scan`, `pow_cookie`, and
   `pow_challenge` source and header families, plus `pow_verify.h`, are
   NGINX-free: C99 `stdint.h`/`stddef.h` types only, zero allocation,
