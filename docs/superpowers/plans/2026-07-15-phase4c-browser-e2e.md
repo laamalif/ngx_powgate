@@ -26,7 +26,7 @@ export CONTAINERS_NO_SYSTEMD=1
 - Chromium executes the exact production script generated from `html/challenge.html` and served by NGINX. Positive E2E and benchmark pages do not wrap or replace `PowGateSolver`, `crypto.subtle.digest()`, timers, Promises, or production source.
 - Keep all wire formats, cookie formats, challenge parameters, server-verification semantics, and CSP policy unchanged. Throughput may change only the controller's fixed pre-search backend order.
 - Preserve the existing architecture-neutral `make check`, `make test-e2e`, and `make test-fuzz-long` meanings. New browser code adds no production directive, runtime dependency, release artifact, protocol vector, or fuzz target.
-- Browser E2E covers the same ten cases under the normal server and a separately built ASan+UBSan server: eight positive solve loops plus two unsafe-path fail-closed cases, for twenty browser cases total.
+- Browser E2E covers the same ten cases under the normal server and a separately built ASan+UBSan server: eight positive solve loops plus two parent-domain fail-closed cases, for twenty browser cases total.
 - Every resource has bounded, idempotent cleanup. A callback failure remains primary; diagnostic and cleanup failures are separate classified secondary failures.
 - Freeze these operation deadlines in `tests/browser/lib/constants.mjs`:
 
@@ -90,7 +90,7 @@ NGINX_KILL_TIMEOUT_MS=2000
 - Create `tests/browser/cookie_occurrences.c`: NGINX-free CLI over `pow_cookie_scan_next()`.
 - Create `tests/browser/lib/request-observation.mjs`: exact JSON-log decoding and production-scanner invocation.
 - Create `tests/browser/request-observation.test.mjs`: JSON-log decoding and production-scanner equivalence tests.
-- Create `tests/browser/e2e.mjs`: H1/H2 positive and unsafe-path negative matrices.
+- Create `tests/browser/e2e.mjs`: H1/H2 positive and parent-domain negative matrices.
 - Create `tests/browser/e2e.test.mjs`: matrix definitions, URL preservation, cookie scope, observer, and event-policy unit tests.
 - Create `tools/prepare-browser-sanitized.sh`: build and describe reusable instrumented server artifacts.
 - Create `tests/sanitizer/alignment_negative_control.c`: project-owned test-only alignment fault.
@@ -842,7 +842,7 @@ git commit -m "test: add real browser PowGate solve matrix"
 
 ---
 
-### Task 7: Add Unsafe-Path Fail-Closed Browser Cases
+### Task 7: Add Parent-Domain Fail-Closed Browser Cases
 
 **Files:**
 - Modify: `tests/browser/e2e.mjs`
@@ -850,13 +850,13 @@ git commit -m "test: add real browser PowGate solve matrix"
 
 **Interfaces:**
 - `installNegativeSolverObserver(page) -> Promise<void>` installs one pre-document observational descriptor.
-- `runUnsafePathNegative(fixture, protocolMode) -> Promise<fixed verdict object>` owns the browser-native literal-semicolon path case.
+- `runParentDomainNegative(fixture, protocolMode) -> Promise<fixed verdict object>` owns the native undeletable-domain case.
 
-- [ ] **Step 1: Add observer descriptor and unsafe-path case tests**
+- [ ] **Step 1: Add observer descriptor and domain-cookie tests**
 
 Unit-test a pre-document observer that accepts exactly one `PowGateSolver` assignment, validates exactly enumerable `sha256` and `solve`, preserves `sha256`, uses `Reflect.apply(namespace.solve, namespace, args)`, returns the original Promise behavior, adds no visible export, and freezes the wrapper. Missing/repeated/different namespace assignment fails before reading the solve count.
 
-Freeze the exact navigation `/account;view=full/orders?mode=unsafe-stale` and host-only cookie path `/account;view=full`. Unit tests require the cookie path to be an exact prefix/path-match of the protected pathname and require a literal semicolon in the unsafe deletion candidate.
+Test browser-cookie metadata using normalized `domain: 'powgate.test'`, `hostOnly === false` where exposed, applicability to `gate.powgate.test`, and no requirement for a leading dot.
 
 ```sh
 node --test tests/browser/e2e.test.mjs
@@ -867,23 +867,20 @@ matrix code changes.
 
 - [ ] **Step 2: Implement the two negative cases**
 
-Seed through CDP/browser cookies for `gate.powgate.test` without a Domain attribute:
+Seed through CDP/browser cookies:
 
 ```js
 {
   name: '__pow_p',
   value: '1.<current-canonical-bucket>.0',
-  path: '/account;view=full',
+  domain: 'powgate.test',
+  path: '/',
   secure: true,
   sameSite: 'Lax'
 }
 ```
 
-Use the protected navigation `/account;view=full/orders?mode=unsafe-stale`. Before controller cleanup, prove that browser storage contains the expected host-only path cookie, the initial request contains it, and capture only `initial_document_cookie_exact_proof_count: 1`. After the 503 and static failure UI, observe `FAIL_CLOSED_QUIET_WINDOW_MS = 1000` and require unchanged URL, one document request total, zero solve calls, zero root proof replacement, zero backend requests, zero reload, no automatic retry, and the unchanged path-scoped cookie. Remove it explicitly during context cleanup.
-
-Retain the positive `/account;view=full?mode=literal&value=1` case. It proves that a literal semicolon alone does not prevent solving; this negative case proves that an undeletable visible cookie at the unsafe path fails closed.
-
-Do not restore the rejected parent-domain assumption. In pinned Chromium, expiring the host-only root proof occurrence can remove a surviving parent-domain proof cookie from the page-visible `document.cookie` surface while leaving it in browser storage. The controller therefore does not reach its fail-closed branch in that state.
+Before controller cleanup, capture only `initial_document_cookie_exact_proof_count: 1`. After the 503 and static failure UI, observe `FAIL_CLOSED_QUIET_WINDOW_MS = 1000` and require unchanged URL, one document request total, zero solve calls, zero proof mutation, zero backend requests, zero reload, no automatic retry, and unchanged parent-domain cookie. Remove it explicitly during context cleanup.
 
 Apply the same 503 challenge/header/protocol assertions as the positive
 matrix before interpreting the terminal controller result.
@@ -898,7 +895,7 @@ Expected fixed summary: `normal_positive=8 normal_negative=2 verdict=passed`.
 
 ```sh
 git add tests/browser/e2e.mjs tests/browser/e2e.test.mjs
-git commit -m "test: cover unsafe proof paths in chromium"
+git commit -m "test: cover undeletable proof cookies in chromium"
 ```
 
 ---
