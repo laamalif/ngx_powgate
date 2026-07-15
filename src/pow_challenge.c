@@ -13,6 +13,8 @@
 
 
 static void pow_write_u64_be(uint8_t *dst, uint64_t value);
+static size_t pow_u64_decimal_len(uint64_t value);
+static void pow_write_u64_decimal(uint8_t *dst, size_t len, uint64_t value);
 
 
 void
@@ -134,6 +136,75 @@ pow_challenge_derive(const uint8_t secret[POW_SECRET_LEN],
 
 
 int
+pow_challenge_serialize(uint8_t difficulty, uint64_t bucket,
+    const uint8_t nonce[POW_NONCE_LEN], uint8_t *buf, size_t buf_cap,
+    pow_challenge_text_t *out)
+{
+    static const uint8_t   version_prefix[] =
+        POW_CHALLENGE_VERSION_PREFIX;
+    static const uint8_t   bucket_prefix[] = POW_CHALLENGE_BUCKET_PREFIX;
+    static const uint8_t   nonce_prefix[] = POW_CHALLENGE_NONCE_PREFIX;
+    pow_challenge_text_t    result;
+    size_t                  encoded_len;
+    size_t                  i;
+    size_t                  offset;
+    size_t                  required;
+
+    if (difficulty < POW_DIFFICULTY_MIN
+        || difficulty > POW_DIFFICULTY_MAX
+        || nonce == NULL || buf == NULL || out == NULL)
+    {
+        return 0;
+    }
+
+    result.difficulty_len = pow_u64_decimal_len(difficulty);
+    result.bucket_len = pow_u64_decimal_len(bucket);
+    required = POW_CHALLENGE_VERSION_PREFIX_LEN + result.difficulty_len
+               + POW_CHALLENGE_BUCKET_PREFIX_LEN + result.bucket_len
+               + POW_CHALLENGE_NONCE_PREFIX_LEN + POW_NONCE_B64URL_LEN;
+
+    if (buf_cap < required) {
+        return 0;
+    }
+
+    offset = 0;
+
+    for (i = 0; i < POW_CHALLENGE_VERSION_PREFIX_LEN; i++) {
+        buf[offset++] = version_prefix[i];
+    }
+
+    result.difficulty_offset = offset;
+    pow_write_u64_decimal(buf + offset, result.difficulty_len, difficulty);
+    offset += result.difficulty_len;
+
+    for (i = 0; i < POW_CHALLENGE_BUCKET_PREFIX_LEN; i++) {
+        buf[offset++] = bucket_prefix[i];
+    }
+
+    result.bucket_offset = offset;
+    pow_write_u64_decimal(buf + offset, result.bucket_len, bucket);
+    offset += result.bucket_len;
+
+    for (i = 0; i < POW_CHALLENGE_NONCE_PREFIX_LEN; i++) {
+        buf[offset++] = nonce_prefix[i];
+    }
+
+    result.nonce_offset = offset;
+    result.nonce_len = POW_NONCE_B64URL_LEN;
+    encoded_len = pow_b64url_encode(nonce, POW_NONCE_LEN, buf + offset,
+                                    buf_cap - offset);
+    if (encoded_len != result.nonce_len) {
+        return 0;
+    }
+
+    result.len = offset + encoded_len;
+    *out = result;
+
+    return 1;
+}
+
+
+int
 pow_proof_check(const uint8_t nonce[POW_NONCE_LEN],
     const uint8_t *counter_ascii, size_t counter_len, uint8_t difficulty)
 {
@@ -222,5 +293,32 @@ pow_write_u64_be(uint8_t *dst, uint64_t value)
     for (i = 0; i < POW_U64_BE_LEN; i++) {
         dst[POW_U64_BE_LEN - 1 - i] = (uint8_t) (value & 0xffU);
         value >>= 8;
+    }
+}
+
+
+static size_t
+pow_u64_decimal_len(uint64_t value)
+{
+    size_t  len;
+
+    len = 1;
+
+    while (value >= 10) {
+        value /= 10;
+        len++;
+    }
+
+    return len;
+}
+
+
+static void
+pow_write_u64_decimal(uint8_t *dst, size_t len, uint64_t value)
+{
+    while (len != 0) {
+        len--;
+        dst[len] = (uint8_t) ('0' + value % 10);
+        value /= 10;
     }
 }
