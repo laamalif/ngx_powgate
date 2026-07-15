@@ -1,9 +1,44 @@
 # PowGate security and secret lifecycle
 
-Phase 2 implements configuration validation, bounded secret loading, and
-reload lifecycle behavior. It does not yet consume secrets to create or
-verify challenges, proofs, or authentication cookies; those cryptographic
-request paths arrive in later phases.
+Through Phase 3, PowGate implements configuration validation, bounded secret
+loading, reload lifecycle behavior, and deterministic challenge creation. It
+does not yet verify proofs or authentication cookies, issue authentication
+cookies, or allow a protected request through after proof-of-work; those
+request paths arrive in Phase 4.
+
+## Phase 3 request boundary
+
+Challenge nonces are HMAC-SHA256 outputs derived from the current secret, the
+post-RealIP client address prefix, and the current time bucket. They are
+intentionally exposed to clients in the challenge header and HTML parameters.
+The same inputs in the same bucket produce the same challenge; there is no
+per-request randomness, stored session, or challenge database.
+
+Only IPv4 and IPv6 connection addresses are valid identities. Unsupported
+address families, including Unix-domain listeners, fail closed with `500`
+before exemption evaluation. The diagnostic contains the numeric family and
+fixed verdict only. Normal challenge issuance is not logged per request, and
+request-path diagnostics never include request bytes, URI, arguments, headers,
+cookies, nonce, MAC, or secret material.
+
+PowGate owns a deliberately small public response surface. Bare challenges
+contain one `PowGate-Challenge` header and an empty `403` body. Browser
+navigations add the exact HTML body, content type, `Cache-Control: no-store`,
+`X-Robots-Tag: noindex`, and the versioned CSP. Range and conditional metadata
+cannot turn these responses into `206` or `304`, and configured `error_page`
+targets do not replace them. Operator CSP headers remain separate policies;
+PowGate never combines or weakens them.
+
+NGINX's standard discard API handles request bodies before PowGate commits a
+challenge response. This prevents unread fixed-length or chunked bodies from
+being mistaken for the next request on a persistent connection. With H1
+`Expect: 100-continue`, a client may close and reconnect after receiving the
+early final challenge; HTTP/2 cancellation remains stream-scoped.
+
+Phase 3 is a delivery milestone, not complete abuse protection. The browser
+script is intentionally inert, and cookies and proof submissions are ignored.
+Do not describe an enabled Phase 3 deployment as a functioning proof-of-work
+gate until Phase 4 verification is implemented.
 
 ## Secret-file validation
 
@@ -53,11 +88,11 @@ configuration pools when a cycle is destroyed or its workers exit.
 
 ## Secret roles
 
-The first secret is current. In the later request-processing phases, it
-derives every new challenge nonce and signs every new authentication cookie.
+The first secret is current. It derives every new challenge nonce and, in a
+later request-processing phase, signs every new authentication cookie.
 The optional second secret is previous and is used only as a verification
 fallback. Both are loaded and validated in Phase 2. Current-secret nonce
-derivation begins in Phase 3. Cookie signing and cookie/proof verification,
+derivation is active in Phase 3. Cookie signing and cookie/proof verification,
 including previous-secret fallback, begin in Phase 4A.
 
 ## Rotation

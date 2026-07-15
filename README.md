@@ -31,6 +31,20 @@ or challenge backend.
 The module is designed to make cheap automated abuse more expensive while
 leaving normal visitors invisible after the first successful challenge.
 
+## Implementation status
+
+Phase 3 is implemented. The module validates its complete configuration,
+loads bounded current and previous secrets, supports operator-driven secret
+rotation, applies IPv4/IPv6 and normalized-path exemptions, and issues
+deterministic challenges over HTTP/1.1 and HTTP/2.
+Browser navigations receive the exact generated HTML page and versioned CSP;
+other requests receive an empty challenge response.
+
+The page currently contains an inert placeholder script. Browser solving,
+proof verification, authentication-cookie issuance, and authenticated
+pass-through remain Phase 4 work. The current build demonstrates and hardens
+challenge delivery but is not yet a functional abuse gate.
+
 ## Requirements
 
 - nginx.org NGINX 1.30.3, or a binary-compatible NGINX 1.30.3 build
@@ -41,10 +55,9 @@ leaving normal visitors invisible after the first successful challenge.
 
 ## Configuration
 
-Phase 2 provides the complete directive surface, inheritance, validation, and
-secret loading. The enabled handler still passes requests through; challenge
-issuance lands in Phase 3, followed by proof and cookie verification in Phase
-4.
+Phase 3 provides the complete directive surface, inheritance, validation,
+secret loading, runtime exemptions, and deterministic challenge issuance.
+Proof and cookie verification follow in Phase 4.
 
 Load the module:
 
@@ -59,6 +72,11 @@ http {
     pow_secret_file /etc/nginx/powgate.secret;
 
     server {
+        listen 443 ssl;
+        http2 on;
+        ssl_certificate /etc/nginx/tls/fullchain.pem;
+        ssl_certificate_key /etc/nginx/tls/private.key;
+
         pow on;
 
         location / {
