@@ -2,8 +2,7 @@
 
 ## Status
 
-Design decisions approved section by section on 2026-07-15. This written
-specification is pending final review before implementation planning.
+Approved for implementation planning on 2026-07-15.
 
 Phase 3 implements challenge delivery only. It does not verify authentication
 cookies, accept proof cookies, issue authentication cookies, or solve proof of
