@@ -480,21 +480,24 @@ function capturingCrypto(byte, records, gate = null) {
             async digest(algorithm, view) {
                 assert.equal(algorithm, 'SHA-256');
                 active++;
-                maximumActive = Math.max(maximumActive, active);
-                const record = {
-                    backing: view.buffer,
-                    byteLength: view.byteLength,
-                    byteOffset: view.byteOffset,
-                    bytes: Buffer.from(view),
-                    bytesAfterWait: null
-                };
-                records.push(record);
-                if (gate != null) {
-                    await gate();
+                try {
+                    maximumActive = Math.max(maximumActive, active);
+                    const record = {
+                        backing: view.buffer,
+                        byteLength: view.byteLength,
+                        byteOffset: view.byteOffset,
+                        bytes: Buffer.from(view),
+                        bytesAfterWait: null
+                    };
+                    records.push(record);
+                    if (gate != null) {
+                        await gate();
+                    }
+                    record.bytesAfterWait = Buffer.from(view);
+                    return new Uint8Array(32).fill(byte).buffer;
+                } finally {
+                    active--;
                 }
-                record.bytesAfterWait = Buffer.from(view);
-                active--;
-                return new Uint8Array(32).fill(byte).buffer;
             }
         }
     };
@@ -767,6 +770,18 @@ full-digest mismatch is terminal`:
    mining timer, no proof write, and no reload. This proves the shared KAT
    compares all 32 bytes rather than accepting the leading-bit boundary alone.
 
+Load `katDigestHex` from the immutable `tests/vectors/v1.json` case using the
+same repository-root pattern as `solver.test.mjs`. Before constructing the
+fallback harness, explicitly preserve the test premise:
+
+```js
+assert.notEqual(Buffer.from(wrongDigest).toString('hex'), katDigestHex);
+```
+
+This assertion must precede controller startup so a future intentional KAT
+fixture change cannot silently turn the wrong-digest row into a success
+fixture.
+
 Retain `valid parameters select the primary backend without subtle access`.
 After Task 3 it invokes the exact production specialized workspace KAT with
 the checked-in expected digest; successful startup proves the uncorrupted JS
@@ -835,6 +850,8 @@ test('primary KAT failure falls back once and full-digest mismatch is terminal',
 
         const wrongDigest = new Uint8Array(32);
         wrongDigest[1] = 0x28;
+        assert.notEqual(Buffer.from(wrongDigest).toString('hex'),
+            katDigestHex);
         const failed = await createControllerHarness({
             crypto: {
                 subtle: {
