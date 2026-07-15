@@ -16,7 +16,9 @@
 - Keep `globalThis.PowGateSolver` frozen with exactly `sha256` and `solve`; keep the exact five-field result and always-Promise `solve()` contract.
 - Keep pure JavaScript primary and sequential SubtleCrypto as the single pre-search fallback. Never migrate backends after mining begins.
 - Hash exactly `nonce_raw(32) || counter_ascii`; do not change any challenge, proof-cookie, server-verification, header, or CSP wire contract.
-- Do not modify `docs/protocol.md`, C sources, NGINX APIs, fuzz target code, or protocol vectors.
+- Do not modify `docs/protocol.md`, C sources, NGINX APIs, fuzz target code,
+  fuzz corpus seeds, or protocol vectors; these JavaScript-only corrections
+  introduce no C parser or wire-format input.
 - Keep the maximum assembled response strictly below `15360` bytes. Measure generated prefix + maximum canonical JSON + suffix, not the template alone.
 - Add no Node performance threshold. Phase 4C owns real-browser measurement and any resulting backend-order decision.
 - Use test-driven development: make each named regression fail for the intended reason before changing production script bytes.
@@ -46,7 +48,7 @@
 - Produces private `stateDigest(state) -> Uint8Array(32)` for general SHA and
   the one startup KAT, never the mining loop.
 - Produces private `encodeCounter(counter, digits) -> startOffset`.
-- Produces private `proofDigestJs(counter, block, words, state, digits) -> undefined`; the nonce is copied into `block` once by the caller and the digest remains in `state`.
+- Produces private `proofDigestJs(counter, block, words, state, digits) -> undefined`; it performs no validation, requires a safe counter already admitted by `solve()`, requires exact 64-byte block, 64-word schedule, eight-word state, and 16-byte digit arrays, requires the block to contain the 32-byte nonce already, and leaves the digest in `state`.
 - Keeps public `sha256(bytes) -> Uint8Array(32)` and `solve(...) -> Promise<frozen result>` unchanged.
 - The accepted initial workspace allocation multiset is `Uint8Array` lengths `32`, `64`, `16` and `Uint32Array` lengths `64`, `8`, independent of attempted candidates. Order is not contractual.
 
@@ -85,10 +87,12 @@ Use `node:crypto.createHash()` through the existing `expectedDigest()` helper. D
 
 - [ ] **Step 2: Add specialized-kernel result, allocation, and isolation tests**
 
-Add three tests. The KAT test uses the checked-in vector nonce and exact counter `34`:
+Add three tests. The predicate-boundary test uses the checked-in KAT nonce and
+exact counter `34`; it deliberately does not claim to inspect the full digest,
+which the exact controller KAT proves in Task 3:
 
 ```js
-test('specialized JS proof path has the full KAT difficulty boundary',
+test('specialized JS proof path has the KAT difficulty boundary',
     async () => {
         const vector = JSON.parse(await fs.readFile(
             path.join(root, 'tests', 'vectors', 'v1.json'), 'utf8'));
@@ -142,9 +146,12 @@ test('JS typed-array allocation is constant per bounded solve', async () => {
 
         assert.equal(result.found, false);
         assert.equal(result.attempts, maxAttempts);
-        deltas.push(allocationMultiset(records.slice(before)));
+        const delta = records.slice(before);
+        assert.deepEqual(delta[0], { name: 'u8', length: 32 });
+        deltas.push(allocationMultiset(delta));
     }
 
+    /* This is the accepted implementation layout, not a public API. */
     assert.deepEqual(deltas[0], [
         'u32:64', 'u32:8', 'u8:16', 'u8:32', 'u8:64'
     ]);
@@ -152,6 +159,12 @@ test('JS typed-array allocation is constant per bounded solve', async () => {
     assert.deepEqual(deltas[2], deltas[0]);
 });
 ```
+
+The first per-call record proves that the defensive nonce snapshot is created
+before the JS workspace. The exact five-allocation multiset is an assertion
+for the accepted implementation only. A later internal refactor may change it
+if it updates this test while preserving positive fixed per-call allocation,
+attempt-count independence, invocation isolation, and the body budget.
 
 Also extend the existing generator-byte test immediately, so every subsequent
 `make test-js` enforces the page budget:
@@ -186,6 +199,18 @@ test('separate JS solve calls own separate workspaces', async () => {
     assert.deepEqual(resultValues(actualA), expectedA);
     assert.deepEqual(resultValues(actualB), expectedB);
 });
+```
+
+Extend `sha256 matches fixed messages and padding boundaries` to keep the
+explicit `55`, `56`, `63`, `64`, and `65` byte rows plus multi-block binary
+input. After obtaining two equal but distinct digest arrays, mutate the first
+and assert the second and a newly computed third digest still equal the Node
+`createHash()` result:
+
+```js
+first[0] ^= 0xff;
+assert.deepEqual(Buffer.from(second), expectedDigest(bytes));
+assert.deepEqual(Buffer.from(solver.sha256(bytes)), expectedDigest(bytes));
 ```
 
 - [ ] **Step 3: Run the new tests and verify the allocation regression fails**
@@ -363,6 +388,11 @@ function meetsState(state, difficulty) {
 }
 ```
 
+The fixed proof message is at most 48 bytes, or 384 bits. `block.fill(0, 32)`
+therefore leaves length bytes 56 through 61 explicitly zero; only bytes 62
+and 63 need the nonzero low 16 bits. Do not add validation or shape checks to
+`proofDigestJs()` or `compressBlock()`.
+
 Replace `solveJs()` with one workspace per call:
 
 ```js
@@ -451,15 +481,18 @@ function capturingCrypto(byte, records, gate = null) {
                 assert.equal(algorithm, 'SHA-256');
                 active++;
                 maximumActive = Math.max(maximumActive, active);
-                if (gate != null) {
-                    await gate();
-                }
-                records.push({
+                const record = {
                     backing: view.buffer,
                     byteLength: view.byteLength,
                     byteOffset: view.byteOffset,
-                    bytes: Buffer.from(view)
-                });
+                    bytes: Buffer.from(view),
+                    bytesAfterWait: null
+                };
+                records.push(record);
+                if (gate != null) {
+                    await gate();
+                }
+                record.bytesAfterWait = Buffer.from(view);
                 active--;
                 return new Uint8Array(32).fill(byte).buffer;
             }
@@ -521,17 +554,10 @@ test('both proof paths use canonical decimal boundaries', async () => {
 });
 ```
 
-Add a structural assertion against the exact production bytes:
-
-```js
-const source = (await readChallengeScript()).toString('utf8');
-assert.equal((source.match(/function encodeCounter\(/g) ?? []).length, 1);
-assert.doesNotMatch(source, /TextEncoder/);
-```
-
-Together, the exact Subtle messages, specialized JS KAT/vector tests, and
-single encoder definition prove the shared encoder without exposing it or
-adding a production test hook.
+The exact Subtle messages, specialized JS KAT/vector tests, and allocation
+instrumentation prove the preparation behavior without a brittle source regex
+or production test hook. Source review confirms both backends call the single
+private `encodeCounter()` defined in Task 1.
 
 - [ ] **Step 3: Strengthen maximum-counter and nonce-alias tests**
 
@@ -575,17 +601,27 @@ await Promise.all([first, second]);
 const byCounter = new Map(records.map((record) => [
     record.bytes.subarray(32).toString('ascii'), record
 ]));
+assert.equal(records.length, 4);
+assert.deepEqual([...byCounter.keys()].sort(), ['0', '1', '2', '3']);
 for (const record of records) {
     assert.deepEqual(record.bytes.subarray(0, 32), Buffer.alloc(32));
+    assert.deepEqual(record.bytesAfterWait, record.bytes);
 }
 assert.equal(byCounter.get('0').backing, byCounter.get('1').backing);
 assert.equal(byCounter.get('2').backing, byCounter.get('3').backing);
 assert.notEqual(byCounter.get('0').backing, byCounter.get('2').backing);
 ```
 
-Add the same public nonce-mutation assertion for JS: call `solve()`, mutate the
-original before awaiting the returned Promise, and compare the result with a
-call using an independent pre-mutation copy.
+The shared gate Promise is intentionally one-shot: it blocks both invocations'
+first provider calls, then remains resolved so counters `1` and `3` run
+without another release. `bytes` proves provider-entry input;
+`bytesAfterWait` separately proves that the backing buffer was not mutated
+while `digest()` remained pending.
+
+Do not add a JS post-call nonce race test. The JS kernel completes
+synchronously before `solve()` returns its Promise, so such a test cannot
+observe snapshot timing. Task 1's constructor order proves the 32-byte copy
+occurs before workspace use; existing tests retain caller-input non-mutation.
 
 - [ ] **Step 4: Run the new Subtle tests and verify they fail structurally**
 
@@ -647,6 +683,9 @@ async function solveSubtle(nonce, difficulty, startCounter, maxAttempts) {
 ```
 
 The next candidate must not touch `message` until the previous `digest()` Promise resolves. Do not use `Promise.all()` or allocate a new backing message array in the loop.
+Bytes beyond `view.byteLength` may retain digits from a longer previous
+counter and are intentionally irrelevant. The exact view length is part of
+the correctness contract; never pass the complete 48-byte buffer.
 
 - [ ] **Step 6: Run both backend suites**
 
@@ -657,7 +696,10 @@ podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
   localhost/ngx-powgate-dev:trixie make test-js
 ```
 
-Expected: all solver and existing controller tests pass; provider maximum concurrency remains `1`, messages are contiguous and canonical, and both backends agree with the immutable vector.
+Expected: all solver and existing controller tests pass; provider maximum
+concurrency remains `1`, messages are contiguous and canonical, both backends
+agree with the immutable vector, and the assembled-body assertion remains
+below `15360` before commit.
 
 - [ ] **Step 7: Commit the shared preparation path**
 
@@ -672,13 +714,18 @@ git commit -m "feat: reuse canonical subtle proof input"
 
 **Files:**
 - Modify: `tests/e2e/controller.test.mjs`
-- Modify: `tests/e2e/solver.test.mjs`
 - Modify: `html/challenge.html:285-470`
 
 **Interfaces:**
 - Consumes private `proofDigestJs()` and `encodeCounter()` from Tasks 1-2.
 - Produces private `backendKat(backend) -> Promise<void>` using the specialized JS digest or exact Subtle provider input.
 - Backend selection completes before `nextCounter`, `totalAttempts`, or mining workspace is committed.
+- A primary initialization or KAT failure advances no counter, increments no
+  attempt count, mutates no controller mining state, and retains no partial
+  workspace; fallback starts from the original counter.
+- The controller owns only backend choice, `nextCounter`, accumulated
+  attempts, slice timing, and UI state. It never receives or stores the block,
+  schedule, SHA state, decimal scratch, or digest workspace.
 - Test-only corruption exists only in the VM global; production bytes contain no fault selector.
 
 - [ ] **Step 1: Add a narrow VM schedule-corruption helper in the controller test**
@@ -700,17 +747,35 @@ function corruptScheduleConstructor(context) {
 ```
 
 This is the accepted implementation-plan mechanism, not a production or enduring wire contract. It runs after exact-script evaluation and before the queued controller startup.
+The fallback test makes no unrelated call to public `sha256()` after
+corruption. The altered constructor exists only long enough to prove the
+primary specialized initialization/KAT failure; it is never used as a general
+hash-failure fixture.
 
 - [ ] **Step 2: Replace the public-`sha256` KAT override test with specialized corruption**
 
-Rewrite `primary KAT failure falls back once and dual failure is terminal`:
+Rewrite the controller regression as `primary KAT failure falls back once and
+full-digest mismatch is terminal`:
 
 1. create a controller harness with real `webcrypto`;
 2. corrupt only its schedule constructor;
 3. wrap `PowGateSolver.solve` to record mining arguments while returning one resumable result;
 4. run the startup timer and then the first mining timer;
 5. assert exactly one mining call with backend `subtle`, start counter `0`, and no pre-mining attempts;
-6. repeat with Subtle unavailable and assert the static failure UI, no mining timer, no proof write, and no reload.
+6. repeat with a wrong 32-byte Subtle digest that begins `00 28` and therefore
+   passes difficulty 8 and 10 but fails 11; assert the static failure UI, no
+   mining timer, no proof write, and no reload. This proves the shared KAT
+   compares all 32 bytes rather than accepting the leading-bit boundary alone.
+
+Retain `valid parameters select the primary backend without subtle access`.
+After Task 3 it invokes the exact production specialized workspace KAT with
+the checked-in expected digest; successful startup proves the uncorrupted JS
+full-digest path. The altered-schedule and threshold-valid-wrong-digest rows
+independently prove fallback and full-byte rejection without exposing a new
+public function. Together these assertions prove that the exact specialized
+digest is serialized from all eight state words and compared across all 32
+bytes; the Task 1 difficulty-boundary row alone is not treated as a
+full-digest KAT.
 
 The core assertions are:
 
@@ -723,13 +788,17 @@ assert.equal(fallback.nodes['pow-progress'].value, 0);
 
 assertFailure(failed);
 assert.equal(failed.timers.length, 0);
-assert.equal(failed.cookieWrites.length, 1); // root cleanup only
+assert.equal(failed.location.reloadCount, 0);
+assert.equal(failed.cookieWrites.some((write) =>
+    write.startsWith(`${proofName}=1.`)), false);
+assert.equal(failed.cookieWrites.every((write) =>
+    write === `${proofName}=; Max-Age=0; Path=/; SameSite=Lax; Secure`), true);
 ```
 
 Use this complete test shape so the clock cannot leave `mineSlice()` looping:
 
 ```js
-test('primary KAT failure falls back once and dual failure is terminal',
+test('primary KAT failure falls back once and full-digest mismatch is terminal',
     async () => {
         const clock = clockFixture();
         const fallback = await createControllerHarness({
@@ -764,15 +833,28 @@ test('primary KAT failure falls back once and dual failure is terminal',
             startCounter: args[2]
         })), [{ backend: 'subtle', startCounter: 0 }]);
 
+        const wrongDigest = new Uint8Array(32);
+        wrongDigest[1] = 0x28;
         const failed = await createControllerHarness({
-            crypto: undefined,
+            crypto: {
+                subtle: {
+                    async digest() {
+                        return wrongDigest.slice().buffer;
+                    }
+                }
+            },
             paramsText: validParams
         });
         corruptScheduleConstructor(failed.context);
         await failed.runNextTimer();
         assertFailure(failed);
         assert.equal(failed.timers.length, 0);
-        assert.equal(failed.cookieWrites.length, 1);
+        assert.equal(failed.location.reloadCount, 0);
+        assert.equal(failed.cookieWrites.some((write) =>
+            write.startsWith(`${proofName}=1.`)), false);
+        assert.equal(failed.cookieWrites.every((write) =>
+            write === `${proofName}=; Max-Age=0; Path=/; SameSite=Lax; Secure`),
+            true);
     });
 ```
 
@@ -839,16 +921,9 @@ last reference disappears. Ensure temporary workspace is lexical to
 `katDigest()` and unreachable after rejection. Keep `selectBackend()` at
 exactly one primary attempt and one fallback attempt.
 
-Tighten Task 2's exact-production-source assertion after removal:
-
-```js
-assert.equal((source.match(/String\(counter\)/g) ?? []).length, 1);
-assert.doesNotMatch(source, /TextEncoder/);
-```
-
-The sole remaining `String(counter)` is the canonical proof-cookie
-serialization in `finishProof()`, where string conversion is explicitly
-allowed. Neither hashing backend may contain another occurrence.
+Cookie serialization in `finishProof()` may continue using `String(counter)`;
+the exact provider-message, allocation, and KAT tests—not source spelling—are
+the regression boundary for proof preparation.
 
 - [ ] **Step 5: Verify fallback and mining-failure boundaries**
 
@@ -856,17 +931,18 @@ Run:
 
 ```bash
 podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
-  localhost/ngx-powgate-dev:trixie \
-  node --test tests/e2e/controller.test.mjs
+  localhost/ngx-powgate-dev:trixie make test-js
 ```
 
-Expected: all controller tests pass. In particular, initialization fallback begins at counter zero, dual failure is static, and `a mining rejection is terminal and does not switch backends` remains green.
+Expected: all solver and controller tests pass, including the assembled-body
+budget. Initialization fallback begins at counter zero, the threshold-valid
+but full-digest-invalid fallback is terminal, and `a mining rejection is
+terminal and does not switch backends` remains green.
 
 - [ ] **Step 6: Commit the KAT transaction**
 
 ```bash
-git add html/challenge.html tests/e2e/controller.test.mjs \
-  tests/e2e/solver.test.mjs
+git add html/challenge.html tests/e2e/controller.test.mjs
 git commit -m "feat: validate specialized browser KAT"
 ```
 
@@ -900,15 +976,32 @@ const cases = [
     { pathname: '/\tunsafe', writes: ['/'] },
     { pathname: '/\x7funsafe', writes: ['/'] },
     { pathname: '/\u00e9', writes: ['/'] },
+    {
+        pathname: '/a/b/\u00e9',
+        writes: ['/', '/a', '/a/', '/a/b', '/a/b/']
+    },
+    { pathname: '/a;b/c', writes: ['/'] },
+    { pathname: '/a,b="c"\\d', writes: ['/', '/a,b="c"\\d'] },
     { pathname: '/a//b', writes: ['/', '/a', '/a/', '/a//', '/a//b'] }
 ];
 ```
 
-For each row, initialize with no stale proof and assert the controller reaches `Checking your browser.`. Convert expected paths to the exact cleanup serialization and assert no unsafe code unit appears in any `document.cookie` assignment.
+For each row, initialize with no stale proof and assert the controller reaches
+`Checking your browser.`. Extract each serialized `Path=` attribute and assert
+the ordered values equal `writes`; apply the safety predicate only to those
+path values because cookie attribute separators are semicolons by design. The
+punctuation row freezes the intended rule as visible ASCII `0x21..0x7e`
+except semicolon, not cookie-token grammar.
+
+The control, DEL, whitespace, and raw non-ASCII rows are synthetic controller
+validation cases injected through the VM harness. Phase 4C browser integration
+owns browser-realistic semicolon, percent-encoded data, repeated-slash, path,
+and query behavior; it must not expect raw C0 controls from a normal browser
+URL parser.
 
 Add a stale-cookie row under `/account/orders;view=full` with removable cookies at `/`, `/account`, and `/account/`; all must disappear. Add an undeletable visible proof row and retain the terminal-failure assertion.
 
-- [ ] **Step 2: Add explicit path/query non-mutation to the harness**
+- [ ] **Step 2: Prove controller path/query non-mutation before reload**
 
 In `createControllerHarness()`, accept `options.search ?? ''`, expose it as `location.search`, and return it unchanged. Add a test using:
 
@@ -929,6 +1022,10 @@ assert.deepEqual({
 ```
 
 After the controlled success path, assert the same pair and one reload. Do not make the controller parse or reconstruct `location.search`.
+Name the test `controller does not reconstruct path or query before reload`.
+This is a Phase 4B unit claim about assignments to the mocked `location`, not
+proof of browser navigation semantics. Phase 4C real-browser E2E owns actual
+reload preservation.
 
 - [ ] **Step 3: Run pathname tests and verify semicolon cases fail before mining**
 
@@ -992,7 +1089,11 @@ podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
   localhost/ngx-powgate-dev:trixie make test-js
 ```
 
-Expected: all controller and solver tests pass. `%3B` is serialized as observed, literal `;` is skipped, root cleanup always occurs, visible stale proof cookies remain terminal, and post-write readback still requires one exact matching value.
+Expected: all controller and solver tests pass. `%3B` is serialized as
+observed, literal `;` is skipped, root cleanup always occurs, visible stale
+proof cookies remain terminal, post-write readback still requires one exact
+matching value, and the assembled-body assertion remains below `15360` before
+commit.
 
 - [ ] **Step 6: Commit valid-path cleanup**
 
@@ -1070,9 +1171,11 @@ Under Phase 4B, add a task recording:
 ```markdown
 7. The pure-JavaScript mining path uses one invocation-local, fixed-shape
    single-block workspace and shares one SHA-256 compression primitive with
-   public `sha256()`. JavaScript creates no explicit typed array, message, or
-   digest object per candidate. Both backends use one direct canonical-decimal
-   encoder; SubtleCrypto awaits one exact-length provider view at a time.
+   public `sha256()`. The pure-JavaScript kernel creates no explicit typed
+   array, message buffer, or digest object per candidate. Both backends use
+   one direct canonical-decimal encoder. The sequential SubtleCrypto backend
+   reuses one invocation-local backing buffer and passes one exact-length view
+   per awaited provider call.
    Cleanup always attempts `/`, skips only unsafe complete derived Path
    candidates, and still requires zero visible `__pow_p` occurrences before
    mining. Literal semicolons are skipped; percent-encoded `%3B` is preserved.
@@ -1093,8 +1196,11 @@ Replace Phase 4C task 3 with:
 In `docs/security.md`, extend the challenge-page paragraph to state:
 
 ```markdown
-The JavaScript mining kernel reuses invocation-local fixed-shape SHA-256
-workspace and creates no explicit typed-array or message object per candidate.
+The pure-JavaScript mining kernel reuses invocation-local fixed-shape SHA-256
+workspace and creates no explicit typed-array, message-buffer, or digest
+object per candidate. The sequential SubtleCrypto backend reuses one backing
+buffer per invocation and passes one exact-length view per awaited provider
+call.
 Before mining, the controller clears every safely serializable derived proof
 cookie path, always including `/`, and fails closed if any exact `__pow_p`
 occurrence remains visible.
@@ -1114,6 +1220,11 @@ percent-encoded `%3B` remains visible ASCII and is preserved as observed.
 Keep Phase 4C described as real-browser CSP, native cookie, reload/auth-loop,
 throughput, responsiveness, and backend-order validation.
 
+Do not add a Phase 4B fuzz seed for this correction. It changes only browser
+JavaScript workspace and pathname handling, not any C parser or wire shape;
+Phase 4C remains responsible for adding real browser proof/cookie shapes to
+the existing corpora.
+
 - [ ] **Step 6: Run documentation and focused delivery checks**
 
 Run:
@@ -1122,9 +1233,11 @@ Run:
 git diff --check
 test -z "$(git diff -- docs/protocol.md)"
 podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
-  localhost/ngx-powgate-dev:trixie make check-policy test-tools test-js
+  localhost/ngx-powgate-dev:trixie \
+  sh -c 'make check-policy && make test-tools && make test-js'
 podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
-  localhost/ngx-powgate-dev:trixie make test-integration test-e2e
+  localhost/ngx-powgate-dev:trixie \
+  sh -c 'make test-integration && make test-e2e'
 ```
 
 Expected: no whitespace errors; `docs/protocol.md` has no diff; policy, generator, Python reference, Node, HTTPS H1/H2 integration, and served-script smoke tests all pass. The actual served body and CSP digest must match the exact checked-in script bytes.
