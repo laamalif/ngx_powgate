@@ -5,7 +5,6 @@ import vm from 'node:vm';
 import {
     buildPartitionedVerdict,
     countExactProofs,
-    observerBootstrap,
     partitionedAcceptance,
 } from './partitioned-feasibility.mjs';
 
@@ -86,42 +85,4 @@ test('page cookie counter is self-contained production-page code', () => {
     );
 
     assert.equal(count, 1);
-});
-
-
-test('observer bootstrap reports installation without enumerable exports', () => {
-    const context = vm.createContext({});
-    vm.runInContext(`
-        globalThis.__powgateSpikeSolveCall = () => {};
-        globalThis.document = {
-            getElementById(id) {
-                return id === 'pow-params' ? {} : null;
-            },
-            addEventListener(_name, listener) {
-                globalThis.listener = listener;
-            },
-        };
-        globalThis.PowGateSolver = Object.freeze({
-            sha256() {},
-            solve() { return Promise.resolve(); },
-        });
-    `, context);
-    vm.runInContext(`(${observerBootstrap.toString()})()`, context);
-
-    assert.equal(vm.runInContext(
-        'Object.prototype.propertyIsEnumerable.call('
-        + 'globalThis, "__powgateSpikeObserver")', context,
-    ), false);
-    assert.equal(vm.runInContext(
-        '__powgateSpikeObserver.snapshot().phase', context,
-    ), 'waiting');
-    vm.runInContext('listener()', context);
-    assert.deepEqual({ ...vm.runInContext(
-        '__powgateSpikeObserver.snapshot()', context,
-    ) }, {
-        descriptorValid: true,
-        exportsValid: true,
-        namespaceFrozen: true,
-        phase: 'installed',
-    });
 });

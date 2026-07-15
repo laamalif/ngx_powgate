@@ -9,6 +9,12 @@ import {
 } from './lib/fixture.mjs';
 import { observeRequest } from './lib/request-observation.mjs';
 import { DEADLINES } from './lib/constants.mjs';
+import {
+    PARTITIONED_PROOF_FIXTURE,
+    partitionedCookieMatchesFixture,
+    partitionedObserverBootstrap,
+    partitionedObserverSnapshot,
+} from './lib/partitioned-proof.mjs';
 
 const BOOLEAN_FIELDS = Object.freeze([
     'initial_document_visible',
@@ -29,8 +35,6 @@ const OBSERVATION_FIELDS = Object.freeze([
 ].sort());
 const AUTH_COOKIE_NAME = 'PowAuth';
 const BACKEND_BODY = 'powgate partitioned backend ok\n';
-const PROOF_COOKIE_NAME = '__pow_p';
-const PROTECTED_TARGET = '/partitioned-feasibility';
 const REQUEST_LOG_PATTERN = /^\{"request_uri":"((?:\\.|[^"\\])*)","cookie":"((?:\\.|[^"\\])*)","status":([0-9]{3})\}$/u;
 const SCANNER_PATH = path.resolve('build/browser-tools/cookie-occurrences');
 const SECRET_HEX = '000102030405060708090a0b0c0d0e0f'
@@ -120,77 +124,6 @@ export function countExactProofs(text) {
 }
 
 
-export function observerBootstrap() {
-    const bindingName = '__powgateSpikeSolveCall';
-    const state = {
-        descriptorValid: false,
-        exportsValid: false,
-        namespaceFrozen: false,
-        phase: 'waiting',
-    };
-
-    Object.defineProperty(globalThis, '__powgateSpikeObserver', {
-        configurable: false,
-        enumerable: false,
-        value: Object.freeze({
-            snapshot() {
-                return Object.freeze({ ...state });
-            },
-        }),
-        writable: false,
-    });
-
-    document.addEventListener('DOMContentLoaded', () => {
-        if (document.getElementById('pow-params') === null) {
-            state.phase = 'ignored';
-            return;
-        }
-        const namespace = globalThis.PowGateSolver;
-        const descriptor = Object.getOwnPropertyDescriptor(
-            globalThis, 'PowGateSolver',
-        );
-        const keys = namespace === null || typeof namespace !== 'object'
-            ? [] : Object.keys(namespace);
-        if (descriptor === undefined || descriptor.value !== namespace
-            || keys.length !== 2 || keys[0] !== 'sha256' || keys[1] !== 'solve'
-            || typeof namespace.sha256 !== 'function'
-            || typeof namespace.solve !== 'function'
-            || !Object.isFrozen(namespace)) {
-            throw new TypeError('invalid PowGateSolver namespace');
-        }
-        const notify = globalThis[bindingName];
-        Object.defineProperty(globalThis, bindingName, {
-            configurable: false,
-            enumerable: false,
-            value: notify,
-            writable: false,
-        });
-        const wrapped = Object.freeze({
-            sha256: namespace.sha256,
-            solve(...args) {
-                notify();
-                return Reflect.apply(namespace.solve, namespace, args);
-            },
-        });
-        Object.defineProperty(globalThis, 'PowGateSolver', {
-            configurable: descriptor.configurable,
-            enumerable: descriptor.enumerable,
-            value: wrapped,
-            writable: descriptor.writable,
-        });
-        const current = globalThis.PowGateSolver;
-        const currentDescriptor = Object.getOwnPropertyDescriptor(
-            globalThis, 'PowGateSolver',
-        );
-        state.descriptorValid = currentDescriptor !== undefined
-            && currentDescriptor.value === wrapped;
-        state.exportsValid = Object.keys(current).join(',') === 'sha256,solve';
-        state.namespaceFrozen = Object.isFrozen(current);
-        state.phase = 'installed';
-    }, { capture: true, once: true });
-}
-
-
 async function renderNginxConfiguration({ paths, ports, modulePath }) {
     const backendLog = path.join(paths.logs, 'partitioned-backend.log');
     const requestLog = path.join(paths.logs, 'partitioned-request.log');
@@ -226,14 +159,14 @@ http {
         ssl_certificate_key ${paths.privateKey};
         access_log ${requestLog} powgate_partitioned;
         location = /__powgate_ready { access_log off; return 204; }
-        location = /__powgate_partitioned_seed {
+        location = ${PARTITIONED_PROOF_FIXTURE.seedPath} {
             access_log off;
-            add_header Set-Cookie "__pow_p=1.0.0; Path=/; Secure; SameSite=Lax; Partitioned";
+            add_header Set-Cookie "${PARTITIONED_PROOF_FIXTURE.setCookie}";
             default_type text/html;
             return 200 '<!doctype html><title>partitioned seed</title>';
         }
         location = /favicon.ico { access_log off; return 204; }
-        location = ${PROTECTED_TARGET} {
+        location = ${PARTITIONED_PROOF_FIXTURE.challengePath} {
             pow on;
             pow_difficulty 8;
             pow_cookie_name ${AUTH_COOKIE_NAME};
@@ -273,22 +206,12 @@ function parseObservationLine(line) {
 
 async function partitionedCookies(session, url) {
     const cookies = await session.context.cookies(url);
-    return cookies.filter((cookie) => cookie.name === PROOF_COOKIE_NAME
-        && cookie.domain === 'gate.powgate.test' && cookie.path === '/'
-        && cookie.partitionKey !== undefined);
+    return cookies.filter(partitionedCookieMatchesFixture);
 }
 
 
-async function installObserver(session, counter) {
-    await session.cdp.send('Runtime.addBinding', {
-        name: '__powgateSpikeSolveCall',
-    });
-    session.cdp.on('Runtime.bindingCalled', (event) => {
-        if (event.name === '__powgateSpikeSolveCall') {
-            counter.calls++;
-        }
-    });
-    await session.page.evaluateOnNewDocument(observerBootstrap);
+async function installObserver(session) {
+    await session.page.evaluateOnNewDocument(partitionedObserverBootstrap);
 }
 
 
@@ -315,13 +238,15 @@ async function runTrial(fixture, observed) {
         protocolMode: 'h2',
         observe: { allowChallengeStatusConsole: true },
     });
-    const solveCounter = { calls: 0 };
-    const protectedUrl = `${fixture.origin}${PROTECTED_TARGET}`;
+    const protectedUrl = `${fixture.origin}${
+        PARTITIONED_PROOF_FIXTURE.challengePath}`;
+    let solveCalls = 0;
     let primaryFailure;
 
     try {
         currentOperation = 'partitioned_seed_navigation';
-        await session.page.goto(`${fixture.origin}/__powgate_partitioned_seed`, {
+        await session.page.goto(`${fixture.origin}${
+            PARTITIONED_PROOF_FIXTURE.seedPath}`, {
             timeout: DEADLINES.document_navigation,
             waitUntil: 'load',
         });
@@ -330,7 +255,7 @@ async function runTrial(fixture, observed) {
             `(${countExactProofs.toString()})(document.cookie)`,
         );
         if (observed) {
-            await installObserver(session, solveCounter);
+            await installObserver(session);
         }
 
         const documentStart = session.documentResponses.length;
@@ -362,7 +287,9 @@ async function runTrial(fixture, observed) {
         assert.equal(requestLines.length >= 1, true);
         const initialRequest = await observeRequest({
             requestUri: requestLines[0].requestUri,
-            expectedRequestUri: Buffer.from(PROTECTED_TARGET, 'ascii'),
+            expectedRequestUri: Buffer.from(
+                PARTITIONED_PROOF_FIXTURE.challengePath, 'ascii',
+            ),
             cookie: requestLines[0].cookie,
             effectiveCookieFieldCount: 1,
             scannerPath: SCANNER_PATH,
@@ -371,13 +298,16 @@ async function runTrial(fixture, observed) {
         assert.equal(initialRequest.singleEffectiveCookieField, true);
 
         if (observed && terminal === 'failure') {
-            assert.deepEqual(await session.page.evaluate(() =>
-                globalThis.__powgateSpikeObserver.snapshot()), {
+            const snapshot = await partitionedObserverSnapshot(session.page);
+            assert.deepEqual(snapshot, {
                 descriptorValid: true,
                 exportsValid: true,
+                namespaceAssignments: 1,
                 namespaceFrozen: true,
                 phase: 'installed',
+                solverCalls: 0,
             });
+            solveCalls = snapshot.solverCalls;
         }
         session.assertHealthy();
 
@@ -390,7 +320,7 @@ async function runTrial(fixture, observed) {
             partitioned_cookie_stored: storedBefore.length === 1,
             post_cleanup_document_visible: postVisible === 1,
             post_cleanup_storage_present: storedAfter.length === 1,
-            solve_calls: solveCounter.calls,
+            solve_calls: solveCalls,
             terminal,
         });
     } catch (error) {
