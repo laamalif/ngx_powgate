@@ -12,6 +12,12 @@
 #define NGX_HTTP_POW_AUTH_OCCURRENCE_MAX  4
 
 
+#if defined(POW_TEST_FAIL_FIRST_SET_COOKIE) \
+    && defined(POW_TEST_FAIL_SECOND_SET_COOKIE)
+#error "only one PowGate Set-Cookie fault may be enabled"
+#endif
+
+
 static ngx_http_pow_verify_result_t ngx_http_pow_verify_proof(
     ngx_http_request_t *r, ngx_http_pow_main_conf_t *pmcf,
     ngx_http_pow_loc_conf_t *plcf, const uint8_t ip16[POW_IP_LEN],
@@ -19,7 +25,8 @@ static ngx_http_pow_verify_result_t ngx_http_pow_verify_proof(
 static ngx_int_t ngx_http_pow_issue_auth(ngx_http_request_t *r,
     ngx_http_pow_main_conf_t *pmcf, ngx_http_pow_loc_conf_t *plcf,
     const uint8_t ip16[POW_IP_LEN], uint8_t plen, uint64_t now);
-static ngx_table_elt_t *ngx_http_pow_set_cookie_slot(ngx_http_request_t *r);
+static ngx_table_elt_t *ngx_http_pow_set_cookie_slot(ngx_http_request_t *r,
+    ngx_uint_t ordinal);
 
 
 ngx_http_pow_verify_result_t
@@ -40,7 +47,7 @@ ngx_http_pow_verify_request(ngx_http_request_t *r,
         || plen < POW_IP_PLEN_MIN || plen > POW_IP_PLEN_MAX)
     {
         if (r != NULL && r->connection != NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                           "pow_gate: operation=verify_request "
                           "verdict=failed");
         }
@@ -66,7 +73,7 @@ ngx_http_pow_verify_request(ngx_http_request_t *r,
             }
 
             if (scan_rc == POW_COOKIE_SCAN_ERROR) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                               "pow_gate: operation=auth_scan "
                               "verdict=failed");
                 return NGX_HTTP_POW_VERIFY_ERROR;
@@ -90,7 +97,7 @@ ngx_http_pow_verify_request(ngx_http_request_t *r,
             }
 
             if (verify_rc == POW_VERIFY_ERROR) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                               "pow_gate: operation=auth_verify "
                               "verdict=failed");
                 return NGX_HTTP_POW_VERIFY_ERROR;
@@ -103,7 +110,7 @@ ngx_http_pow_verify_request(ngx_http_request_t *r,
     }
 
     if (occurrences != 0) {
-        ngx_log_error(plcf->log_level, r->connection->log, 0,
+        ngx_log_error(plcf->log_level, ngx_cycle->log, 0,
                       "pow_gate: operation=auth verdict=invalid "
                       "occurrences=%ui", occurrences);
     }
@@ -141,7 +148,7 @@ ngx_http_pow_verify_proof(ngx_http_request_t *r,
         }
 
         if (scan_rc == POW_COOKIE_SCAN_ERROR) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                           "pow_gate: operation=proof_scan verdict=failed");
             return NGX_HTTP_POW_VERIFY_ERROR;
         }
@@ -211,7 +218,7 @@ found:
 
 invalid:
 
-    ngx_log_error(plcf->log_level, r->connection->log, 0,
+    ngx_log_error(plcf->log_level, ngx_cycle->log, 0,
                   "pow_gate: operation=proof verdict=invalid "
                   "value_len=%uz", value.len);
 
@@ -219,14 +226,14 @@ invalid:
 
 issue_error:
 
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                   "pow_gate: operation=cookie_issue verdict=failed");
 
     return NGX_HTTP_POW_VERIFY_ERROR;
 
 error:
 
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                   "pow_gate: operation=proof_verify verdict=failed");
 
     return NGX_HTTP_POW_VERIFY_ERROR;
@@ -311,12 +318,12 @@ ngx_http_pow_issue_auth(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    auth_header = ngx_http_pow_set_cookie_slot(r);
+    auth_header = ngx_http_pow_set_cookie_slot(r, 1);
     if (auth_header == NULL) {
         return NGX_ERROR;
     }
 
-    proof_header = ngx_http_pow_set_cookie_slot(r);
+    proof_header = ngx_http_pow_set_cookie_slot(r, 2);
     if (proof_header == NULL) {
         return NGX_ERROR;
     }
@@ -337,9 +344,21 @@ ngx_http_pow_issue_auth(ngx_http_request_t *r,
 
 
 static ngx_table_elt_t *
-ngx_http_pow_set_cookie_slot(ngx_http_request_t *r)
+ngx_http_pow_set_cookie_slot(ngx_http_request_t *r, ngx_uint_t ordinal)
 {
     ngx_table_elt_t  *header;
+
+#if defined(POW_TEST_FAIL_FIRST_SET_COOKIE)
+    if (ordinal == 1) {
+        return NULL;
+    }
+#endif
+
+#if defined(POW_TEST_FAIL_SECOND_SET_COOKIE)
+    if (ordinal == 2) {
+        return NULL;
+    }
+#endif
 
     header = ngx_list_push(&r->headers_out.headers);
     if (header == NULL) {

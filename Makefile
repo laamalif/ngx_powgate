@@ -2,6 +2,8 @@ SHELL := /bin/sh
 
 NGX_SOURCE_DIR ?= /opt/ngx-powgate/nginx-source
 MODULE := out/ngx_http_pow_module.so
+FAULT_FIRST_MODULE := build/fault-first/ngx_http_pow_module_fault_first.so
+FAULT_SECOND_MODULE := build/fault-second/ngx_http_pow_module_fault_second.so
 BUILD_DIR ?= build
 GENERATED_DIR := build/generated
 CHALLENGE_HEADER := $(GENERATED_DIR)/pow_challenge_page.h
@@ -13,7 +15,8 @@ FUZZ_CFLAGS := $(PURE_CFLAGS) -fsanitize=fuzzer,address,undefined \
 COVERAGE_CFLAGS := $(PURE_CFLAGS) -O0 --coverage
 COVERAGE_LDFLAGS := --coverage
 
-.PHONY: check-policy check-test-env challenge-page module test-tools test-unit \
+.PHONY: check-policy check-test-env challenge-page module fault-modules \
+	test-tools test-unit \
 	test-vector-python test-fuzz test-fuzz-long test-coverage \
 	test-integration test-e2e asan check clean
 
@@ -217,22 +220,18 @@ test-coverage: $(BUILD_DIR)/coverage/test_parse \
 	./tools/check-parser-coverage.sh $(BUILD_DIR)/coverage
 
 module: $(CHALLENGE_HEADER)
-	@set -eu; \
-	test -f "$(NGX_SOURCE_DIR)/src/core/nginx.h"; \
-	mkdir -p out; \
-	build_dir=$$(mktemp -d /tmp/ngx-powgate.XXXXXX); \
-	trap 'rm -rf "$$build_dir"' EXIT HUP INT TERM; \
-	cp -a "$(NGX_SOURCE_DIR)/." "$$build_dir"; \
-	cd "$$build_dir"; \
-	./configure --with-compat \
-	    --with-cc-opt='-D_FORTIFY_SOURCE=2 -fstack-protector-strong' \
-	    --add-dynamic-module=/work; \
-	$(MAKE) modules; \
-	install -m 0755 objs/ngx_http_pow_module.so /work/$(MODULE)
+	./tools/build-pow-module.sh normal $(MODULE)
 
-test-integration: check-test-env module
+fault-modules: $(CHALLENGE_HEADER)
+	./tools/build-pow-module.sh fault-first $(FAULT_FIRST_MODULE)
+	./tools/build-pow-module.sh fault-second $(FAULT_SECOND_MODULE)
+	@test -z "$$(find out -type f -name '*fault*' -print)"
+
+test-integration: check-test-env module fault-modules
 	TEST_NGINX_BINARY=/usr/sbin/nginx \
 	POW_MODULE_PATH=/work/out/ngx_http_pow_module.so \
+	POW_FAULT_FIRST_MODULE_PATH=/work/$(FAULT_FIRST_MODULE) \
+	POW_FAULT_SECOND_MODULE_PATH=/work/$(FAULT_SECOND_MODULE) \
 	TEST_NGINX_SERVROOT=/tmp/ngx-powgate-test \
 	prove -Itests/integration/lib -v tests/integration/*.t
 

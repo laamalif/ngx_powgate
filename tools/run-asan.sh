@@ -52,6 +52,17 @@ test -x objs/nginx
 test -f objs/ngx_http_pow_module.so
 
 cd "$root"
+CC=clang \
+POW_BUILD_CC_OPT="$sanitizers" \
+POW_BUILD_LD_OPT='-fsanitize=address,undefined' \
+./tools/build-pow-module.sh fault-first \
+    "$work/fault-first/ngx_http_pow_module_fault_first.so"
+CC=clang \
+POW_BUILD_CC_OPT="$sanitizers" \
+POW_BUILD_LD_OPT='-fsanitize=address,undefined' \
+./tools/build-pow-module.sh fault-second \
+    "$work/fault-second/ngx_http_pow_module_fault_second.so"
+
 integration_status=0
 env \
     ASAN_OPTIONS="$asan_nginx" \
@@ -59,6 +70,10 @@ env \
     TEST_NGINX_BINARY="$work/nginx/objs/nginx" \
     TEST_NGINX_SERVROOT="$work/servroot" \
     POW_MODULE_PATH="$work/nginx/objs/ngx_http_pow_module.so" \
+    POW_FAULT_FIRST_MODULE_PATH=\
+"$work/fault-first/ngx_http_pow_module_fault_first.so" \
+    POW_FAULT_SECOND_MODULE_PATH=\
+"$work/fault-second/ngx_http_pow_module_fault_second.so" \
     prove -Itests/integration/lib -v tests/integration/*.t \
     || integration_status=$?
 
