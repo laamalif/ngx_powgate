@@ -4,6 +4,10 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 ARG TARGETARCH
+ARG GOLDEN_IMAGE_LOCK_SHA256
+
+LABEL org.ngx-powgate.golden-image-lock=${GOLDEN_IMAGE_LOCK_SHA256}
+ENV POWGATE_GOLDEN_IMAGE_LOCK=${GOLDEN_IMAGE_LOCK_SHA256}
 
 COPY build/versions.env /usr/local/share/ngx-powgate/versions.env
 COPY build/browser/ /usr/local/share/ngx-powgate/browser/

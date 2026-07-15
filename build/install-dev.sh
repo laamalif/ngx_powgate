@@ -12,15 +12,34 @@ fi
 case "$1" in
     amd64)
         nginx_package_sha256=$NGINX_PACKAGE_SHA256_AMD64
+        locked_debian_packages=1
         ;;
     arm64)
         nginx_package_sha256=$NGINX_PACKAGE_SHA256_ARM64
+        locked_debian_packages=0
         ;;
     *)
         echo "unsupported architecture: $1" >&2
         exit 1
         ;;
 esac
+
+download_locked_deb() {
+    package=$1
+    version=$2
+    checksum=$3
+    rm -f ./*.deb
+    apt-get download "${package}=${version}"
+    set -- ./*.deb
+    test "$#" -eq 1
+    deb=$(pwd)/${1#./}
+    printf '%s  %s\n' "$checksum" "$deb" | sha256sum -c -
+    dpkg --unpack "$deb"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        --no-install-recommends --fix-broken
+    installed=$(dpkg-query -W -f='${Version}' "$package")
+    test "$installed" = "$version"
+}
 
 printf '%s\n' \
     "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie main" \
@@ -35,8 +54,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     clang \
-    chromium="${CHROMIUM_VERSION}" \
-    chromium-sandbox="${CHROMIUM_VERSION}" \
     cmake \
     cpanminus \
     curl \
@@ -55,8 +72,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     m4 \
     netcat-openbsd \
     nghttp2-client \
-    nodejs \
-    npm \
     perl \
     pkg-config \
     procps \
@@ -64,6 +79,24 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     strace \
     valgrind \
     zlib1g-dev
+
+mkdir -p /tmp/debian-download
+cd /tmp/debian-download
+
+if [ "$locked_debian_packages" -eq 1 ]; then
+    download_locked_deb chromium "$CHROMIUM_VERSION" \
+        "$CHROMIUM_SHA256_AMD64"
+    download_locked_deb chromium-sandbox "$CHROMIUM_SANDBOX_VERSION" \
+        "$CHROMIUM_SANDBOX_SHA256_AMD64"
+    download_locked_deb nodejs "$NODEJS_VERSION" "$NODEJS_SHA256_AMD64"
+    download_locked_deb npm "$NPM_VERSION" "$NPM_SHA256_AMD64"
+else
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        "chromium=${CHROMIUM_VERSION}" \
+        "chromium-sandbox=${CHROMIUM_SANDBOX_VERSION}" \
+        "nodejs=${NODEJS_VERSION}" \
+        "npm=${NPM_VERSION}"
+fi
 
 mkdir -p /tmp/nginx-download /opt/ngx-powgate
 cd /tmp/nginx-download
@@ -95,7 +128,8 @@ mkdir -p /opt/ngx-powgate/browser
 cp /usr/local/share/ngx-powgate/browser/package.json \
     /usr/local/share/ngx-powgate/browser/package-lock.json \
     /opt/ngx-powgate/browser/
-npm ci --prefix /opt/ngx-powgate/browser --ignore-scripts --omit=dev \
+npm ci --prefix /opt/ngx-powgate/browser --ignore-scripts \
     --no-audit --no-fund
 
-rm -rf /tmp/nginx-download /tmp/nginx-gnupg /var/lib/apt/lists/*
+rm -rf /tmp/debian-download /tmp/nginx-download /tmp/nginx-gnupg \
+    /var/lib/apt/lists/*

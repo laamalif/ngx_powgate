@@ -46,6 +46,13 @@ test -f "$NGX_SOURCE_DIR/src/core/nginx.h"
 
 cc_opt=${POW_BUILD_CC_OPT:--D_FORTIFY_SOURCE=2 -fstack-protector-strong}
 ld_opt=${POW_BUILD_LD_OPT:-}
+module_jobs=2
+
+case "$(uname -m)" in
+    amd64 | x86_64)
+        module_jobs=8
+        ;;
+esac
 
 if test -n "$define"; then
     cc_opt="$cc_opt $define"
@@ -64,7 +71,7 @@ fi
 
 set -- "$@" "--add-dynamic-module=$root"
 ./configure "$@"
-make modules
+make -j"$module_jobs" modules
 
 mkdir -p "$(dirname "$output")"
 install -m 0755 objs/ngx_http_pow_module.so "$output"

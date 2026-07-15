@@ -17,6 +17,8 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
+python3 tools/golden-image-lock.py check || exit 1
+
 if [ ! -d src ]; then
     echo "check-policy: src/ not present yet; nothing to check"
     exit 0

@@ -2,7 +2,8 @@
   "name": "ngx-powgate-browser-tests",
   "private": true,
   "version": "1.0.0",
-  "dependencies": {
+  "devDependencies": {
+    "ajv": "8.17.1",
     "puppeteer-core": "24.43.1"
   }
 }
