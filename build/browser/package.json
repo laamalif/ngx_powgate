@@ -1,0 +1,8 @@
+{
+  "name": "ngx-powgate-browser-tests",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "puppeteer-core": "24.43.1"
+  }
+}
