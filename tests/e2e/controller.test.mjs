@@ -39,6 +39,41 @@ function assertFailure(harness) {
 }
 
 
+function clockFixture() {
+    let value = 0;
+
+    return {
+        advance(delta) {
+            value += delta;
+        },
+        performance: {
+            now() {
+                return value;
+            }
+        }
+    };
+}
+
+
+async function miningHarness(solve, options = {}) {
+    const clock = options.clock ?? clockFixture();
+    const harness = await createControllerHarness({
+        crypto: webcrypto,
+        paramsText: validParams,
+        performance: clock.performance,
+        ...options
+    });
+    const original = harness.context.PowGateSolver;
+
+    harness.context.PowGateSolver = Object.freeze({
+        sha256: original.sha256,
+        solve
+    });
+    await harness.runNextTimer();
+    return { clock, harness };
+}
+
+
 test('page has the exact accessible challenge structure', async () => {
     const page = (await readChallengePage()).toString('utf8');
 
@@ -204,5 +239,219 @@ test('failure retry navigates once and does not restart the controller',
         await harness.nodes['pow-retry'].dispatch('click');
         await harness.nodes['pow-retry'].dispatch('click');
         assert.equal(harness.location.reloadCount, 1);
+        assert.equal(harness.timers.length, 0);
+    });
+
+
+test('foreground slices are contiguous, adaptive, and time bounded',
+    async () => {
+        const calls = [];
+        const clock = clockFixture();
+        const { harness } = await miningHarness(async (
+            _nonce, _difficulty, startCounter, maxAttempts, backend
+        ) => {
+            calls.push({ backend, maxAttempts, startCounter });
+            clock.advance(1);
+            return Object.freeze({
+                found: false,
+                exhausted: false,
+                counter: null,
+                nextCounter: startCounter + maxAttempts,
+                attempts: maxAttempts
+            });
+        }, { clock });
+
+        assert.equal(harness.timers.length, 1);
+        await harness.runNextTimer();
+
+        assert.equal(calls[0].startCounter, 0);
+        assert.equal(calls[0].maxAttempts, 1);
+        assert.equal(calls.every((call) => call.backend === 'js'), true);
+        assert.equal(calls.some((call) => call.maxAttempts > 1), true);
+        for (let index = 1; index < calls.length; index++) {
+            assert.equal(calls[index].startCounter,
+                calls[index - 1].startCounter
+                    + calls[index - 1].maxAttempts);
+        }
+        assert.equal(harness.timers.length, 1);
+        assert.equal(harness.timers[0].delay, 0);
+        assert.ok(harness.nodes['pow-progress'].value > 0);
+        assert.ok(harness.nodes['pow-progress'].value < 1);
+    });
+
+
+test('hidden pages pause without losing the next candidate', async () => {
+    const starts = [];
+    const clock = clockFixture();
+    const { harness } = await miningHarness(async (
+        _nonce, _difficulty, startCounter, maxAttempts
+    ) => {
+        starts.push(startCounter);
+        clock.advance(10);
+        return Object.freeze({
+            found: false,
+            exhausted: false,
+            counter: null,
+            nextCounter: startCounter + maxAttempts,
+            attempts: maxAttempts
+        });
+    }, { clock });
+
+    await harness.runNextTimer();
+    const progress = harness.nodes['pow-progress'].value;
+    harness.document.hidden = true;
+    await harness.documentListeners.get('visibilitychange')();
+    await harness.runNextTimer();
+    assert.equal(starts.length, 1);
+    assert.equal(harness.timers.length, 0);
+    assert.equal(harness.nodes['pow-progress'].value, progress);
+
+    harness.document.hidden = false;
+    await harness.documentListeners.get('visibilitychange')();
+    assert.equal(harness.timers.length, 1);
+    await harness.runNextTimer();
+    assert.equal(starts.length, 2);
+    assert.equal(starts[1], 1);
+    assert.equal(harness.nodes['pow-progress'].value >= progress, true);
+});
+
+
+test('visibility changes cannot start a second in-flight miner', async () => {
+    const starts = [];
+    const clock = clockFixture();
+    let release;
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    const { harness } = await miningHarness(async (
+        _nonce, _difficulty, startCounter, maxAttempts
+    ) => {
+        starts.push(startCounter);
+        await gate;
+        clock.advance(10);
+        return Object.freeze({
+            found: false,
+            exhausted: false,
+            counter: null,
+            nextCounter: startCounter + maxAttempts,
+            attempts: maxAttempts
+        });
+    }, { clock });
+
+    const pending = harness.runNextTimer();
+    assert.deepEqual(starts, [0]);
+    harness.document.hidden = true;
+    await harness.documentListeners.get('visibilitychange')();
+    harness.document.hidden = false;
+    await harness.documentListeners.get('visibilitychange')();
+    assert.equal(harness.timers.length, 0);
+
+    release();
+    await pending;
+    assert.equal(harness.timers.length, 1);
+    assert.deepEqual(starts, [0]);
+});
+
+
+test('progress uses probability and reaches one only on success', async () => {
+    const clock = clockFixture();
+    const { harness } = await miningHarness(async (
+        _nonce, _difficulty, startCounter, maxAttempts
+    ) => {
+        clock.advance(10);
+        return Object.freeze({
+            found: false,
+            exhausted: false,
+            counter: null,
+            nextCounter: startCounter + maxAttempts,
+            attempts: maxAttempts
+        });
+    }, { clock });
+
+    await harness.runNextTimer();
+    assert.ok(Math.abs(harness.nodes['pow-progress'].value
+        - (1 - Math.exp(-1 / 256))) < 1e-12);
+    assert.ok(harness.nodes['pow-progress'].value < 1);
+    assert.doesNotMatch(harness.nodes['pow-status'].textContent,
+        /256|counter|backend|difficulty/i);
+});
+
+
+test('success writes the canonical proof cookie and reloads once',
+    async () => {
+        for (const [protocol, suffix] of [
+            ['https:', '; Secure'],
+            ['http:', '']
+        ]) {
+            const clock = clockFixture();
+            const { harness } = await miningHarness(async () => {
+                clock.advance(1);
+                return Object.freeze({
+                    found: true,
+                    exhausted: false,
+                    counter: 34,
+                    nextCounter: null,
+                    attempts: 1
+                });
+            }, { clock, protocol });
+
+            await harness.runNextTimer();
+            assert.equal(harness.cookieWrites.at(-1),
+                '__pow_p=1.29333333.34; Path=/; SameSite=Lax' + suffix);
+            assert.equal(harness.document.cookie, '__pow_p=1.29333333.34');
+            assert.equal(harness.nodes['pow-progress'].value, 1);
+            assert.equal(harness.location.reloadCount, 1);
+            assert.equal(harness.timers.length, 0);
+        }
+    });
+
+
+test('failed proof-cookie readback never reloads', async () => {
+    for (const mode of ['blocked', 'duplicate']) {
+        const clock = clockFixture();
+        const { harness } = await miningHarness(async () => {
+            clock.advance(1);
+            return Object.freeze({
+                found: true,
+                exhausted: false,
+                counter: 34,
+                nextCounter: null,
+                attempts: 1
+            });
+        }, {
+            blockCookieWrites: mode === 'blocked',
+            clock,
+            pathname: mode === 'duplicate' ? '/deep' : '/'
+        });
+
+        if (mode === 'duplicate') {
+            harness.cookieEntries.push({
+                name: '__pow_p',
+                value: 'shadow',
+                path: '/deep',
+                secure: false,
+                undeletable: true
+            });
+        }
+
+        await harness.runNextTimer();
+        assertFailure(harness);
+        assert.equal(harness.location.reloadCount, 0);
+        assert.equal(harness.timers.length, 0);
+    }
+});
+
+
+test('a mining rejection is terminal and does not switch backends',
+    async () => {
+        let calls = 0;
+        const { harness } = await miningHarness(async () => {
+            calls++;
+            throw new Error('mining failed');
+        });
+
+        await harness.runNextTimer();
+        assert.equal(calls, 1);
+        assertFailure(harness);
         assert.equal(harness.timers.length, 0);
     });

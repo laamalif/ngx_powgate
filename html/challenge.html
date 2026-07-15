@@ -25,463 +25,562 @@ button { margin-top: 1rem; }
 'use strict';
 
 const round = Object.freeze([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-  0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-  0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-  0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-  0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-  0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+	0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+	0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+	0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+	0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+	0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+	0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+	0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+	0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+	0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+	0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+	0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+	0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+	0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+	0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 ]);
 
 function rotate(value, bits) {
-  return (value >>> bits) | (value << (32 - bits));
+	return (value >>> bits) | (value << (32 - bits));
 }
 
 function sha256(bytes) {
-  if (!(bytes instanceof Uint8Array)) {
-    throw new TypeError('bytes');
-  }
+	if (!(bytes instanceof Uint8Array)) {
+		throw new TypeError();
+	}
 
-  const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
-  const padded = new Uint8Array(paddedLength);
-  const words = new Uint32Array(64);
-  const state = new Uint32Array([
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-  ]);
-  const bitLength = bytes.length * 8;
+	const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+	const padded = new Uint8Array(paddedLength);
+	const words = new Uint32Array(64);
+	const state = new Uint32Array([
+		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+	]);
+	const bitLength = bytes.length * 8;
 
-  padded.set(bytes);
-  padded[bytes.length] = 0x80;
+	padded.set(bytes);
+	padded[bytes.length] = 0x80;
 
-  const high = Math.floor(bitLength / 0x100000000);
-  const low = bitLength >>> 0;
-  const end = padded.length;
+	const high = Math.floor(bitLength / 0x100000000);
+	const low = bitLength >>> 0;
+	const end = padded.length;
 
-  padded[end - 8] = high >>> 24;
-  padded[end - 7] = high >>> 16;
-  padded[end - 6] = high >>> 8;
-  padded[end - 5] = high;
-  padded[end - 4] = low >>> 24;
-  padded[end - 3] = low >>> 16;
-  padded[end - 2] = low >>> 8;
-  padded[end - 1] = low;
+	padded[end - 8] = high >>> 24;
+	padded[end - 7] = high >>> 16;
+	padded[end - 6] = high >>> 8;
+	padded[end - 5] = high;
+	padded[end - 4] = low >>> 24;
+	padded[end - 3] = low >>> 16;
+	padded[end - 2] = low >>> 8;
+	padded[end - 1] = low;
 
-  for (let offset = 0; offset < end; offset += 64) {
-    for (let index = 0; index < 16; index++) {
-      const at = offset + index * 4;
-      words[index] = (padded[at] << 24) | (padded[at + 1] << 16)
-        | (padded[at + 2] << 8) | padded[at + 3];
-    }
+	for (let offset = 0; offset < end; offset += 64) {
+		for (let index = 0; index < 16; index++) {
+			const at = offset + index * 4;
+			words[index] = (padded[at] << 24) | (padded[at + 1] << 16)
+				| (padded[at + 2] << 8) | padded[at + 3];
+		}
 
-    for (let index = 16; index < 64; index++) {
-      const x = words[index - 15];
-      const y = words[index - 2];
-      const s0 = rotate(x, 7) ^ rotate(x, 18) ^ (x >>> 3);
-      const s1 = rotate(y, 17) ^ rotate(y, 19) ^ (y >>> 10);
-      words[index] = (words[index - 16] + s0 + words[index - 7] + s1)
-        >>> 0;
-    }
+		for (let index = 16; index < 64; index++) {
+			const x = words[index - 15];
+			const y = words[index - 2];
+			const s0 = rotate(x, 7) ^ rotate(x, 18) ^ (x >>> 3);
+			const s1 = rotate(y, 17) ^ rotate(y, 19) ^ (y >>> 10);
+			words[index] = (words[index - 16] + s0 + words[index - 7] + s1)
+				>>> 0;
+		}
 
-    let a = state[0];
-    let b = state[1];
-    let c = state[2];
-    let d = state[3];
-    let e = state[4];
-    let f = state[5];
-    let g = state[6];
-    let h = state[7];
+		let a = state[0];
+		let b = state[1];
+		let c = state[2];
+		let d = state[3];
+		let e = state[4];
+		let f = state[5];
+		let g = state[6];
+		let h = state[7];
 
-    for (let index = 0; index < 64; index++) {
-      const sum1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
-      const choose = (e & f) ^ (~e & g);
-      const first = (h + sum1 + choose + round[index] + words[index]) >>> 0;
-      const sum0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
-      const majority = (a & b) ^ (a & c) ^ (b & c);
-      const second = (sum0 + majority) >>> 0;
+		for (let index = 0; index < 64; index++) {
+			const sum1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
+			const choose = (e & f) ^ (~e & g);
+			const first = (h + sum1 + choose + round[index] + words[index]) >>> 0;
+			const sum0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
+			const majority = (a & b) ^ (a & c) ^ (b & c);
+			const second = (sum0 + majority) >>> 0;
 
-      h = g;
-      g = f;
-      f = e;
-      e = (d + first) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (first + second) >>> 0;
-    }
+			h = g;
+			g = f;
+			f = e;
+			e = (d + first) >>> 0;
+			d = c;
+			c = b;
+			b = a;
+			a = (first + second) >>> 0;
+		}
 
-    state[0] = (state[0] + a) >>> 0;
-    state[1] = (state[1] + b) >>> 0;
-    state[2] = (state[2] + c) >>> 0;
-    state[3] = (state[3] + d) >>> 0;
-    state[4] = (state[4] + e) >>> 0;
-    state[5] = (state[5] + f) >>> 0;
-    state[6] = (state[6] + g) >>> 0;
-    state[7] = (state[7] + h) >>> 0;
-  }
+		state[0] = (state[0] + a) >>> 0;
+		state[1] = (state[1] + b) >>> 0;
+		state[2] = (state[2] + c) >>> 0;
+		state[3] = (state[3] + d) >>> 0;
+		state[4] = (state[4] + e) >>> 0;
+		state[5] = (state[5] + f) >>> 0;
+		state[6] = (state[6] + g) >>> 0;
+		state[7] = (state[7] + h) >>> 0;
+	}
 
-  const digest = new Uint8Array(32);
+	const digest = new Uint8Array(32);
 
-  for (let index = 0; index < state.length; index++) {
-    const at = index * 4;
-    digest[at] = state[index] >>> 24;
-    digest[at + 1] = state[index] >>> 16;
-    digest[at + 2] = state[index] >>> 8;
-    digest[at + 3] = state[index];
-  }
+	for (let index = 0; index < state.length; index++) {
+		const at = index * 4;
+		digest[at] = state[index] >>> 24;
+		digest[at + 1] = state[index] >>> 16;
+		digest[at + 2] = state[index] >>> 8;
+		digest[at + 3] = state[index];
+	}
 
-  return digest;
+	return digest;
 }
 
 function proofMessage(nonce, counter) {
-  const text = String(counter);
-  const message = new Uint8Array(nonce.length + text.length);
+	const text = String(counter);
+	const message = new Uint8Array(nonce.length + text.length);
 
-  message.set(nonce);
-  for (let index = 0; index < text.length; index++) {
-    message[nonce.length + index] = text.charCodeAt(index);
-  }
+	message.set(nonce);
+	for (let index = 0; index < text.length; index++) {
+		message[nonce.length + index] = text.charCodeAt(index);
+	}
 
-  return message;
+	return message;
 }
 
 function meetsDifficulty(digest, difficulty) {
-  const bytes = Math.floor(difficulty / 8);
+	const bytes = Math.floor(difficulty / 8);
 
-  for (let index = 0; index < bytes; index++) {
-    if (digest[index] !== 0) {
-      return false;
-    }
-  }
+	for (let index = 0; index < bytes; index++) {
+		if (digest[index] !== 0) {
+			return false;
+		}
+	}
 
-  const bits = difficulty % 8;
-  return bits === 0 || (digest[bytes] >>> (8 - bits)) === 0;
+	const bits = difficulty % 8;
+	return bits === 0 || (digest[bytes] >>> (8 - bits)) === 0;
 }
 
 function solveResult(found, exhausted, counter, nextCounter, attempts) {
-  return Object.freeze({
-    found,
-    exhausted,
-    counter,
-    nextCounter,
-    attempts
-  });
+	return Object.freeze({
+		found,
+		exhausted,
+		counter,
+		nextCounter,
+		attempts
+	});
 }
 
 function validateSolve(nonce, difficulty, startCounter, maxAttempts,
-  backend) {
-  if (!(nonce instanceof Uint8Array) || nonce.length !== 32
-    || !Number.isInteger(difficulty) || difficulty < 1 || difficulty > 32
-    || !Number.isSafeInteger(startCounter) || startCounter < 0
-    || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1
-    || (backend !== 'js' && backend !== 'subtle')) {
-    throw new TypeError('solver arguments');
-  }
+	backend) {
+	if (!(nonce instanceof Uint8Array) || nonce.length !== 32
+		|| !Number.isInteger(difficulty) || difficulty < 1 || difficulty > 32
+		|| !Number.isSafeInteger(startCounter) || startCounter < 0
+		|| !Number.isSafeInteger(maxAttempts) || maxAttempts < 1
+		|| (backend !== 'js' && backend !== 'subtle')) {
+		throw new TypeError();
+	}
 }
 
 function solveJs(nonce, difficulty, startCounter, maxAttempts) {
-  let attempts = 0;
-  let candidate = startCounter;
+	let attempts = 0;
+	let candidate = startCounter;
 
-  for (;;) {
-    const digest = sha256(proofMessage(nonce, candidate));
-    attempts++;
+	for (;;) {
+		const digest = sha256(proofMessage(nonce, candidate));
+		attempts++;
 
-    if (meetsDifficulty(digest, difficulty)) {
-      return solveResult(true, false, candidate, null, attempts);
-    }
+		if (meetsDifficulty(digest, difficulty)) {
+			return solveResult(true, false, candidate, null, attempts);
+		}
 
-    if (candidate === Number.MAX_SAFE_INTEGER) {
-      return solveResult(false, true, null, null, attempts);
-    }
+		if (candidate === Number.MAX_SAFE_INTEGER) {
+			return solveResult(false, true, null, null, attempts);
+		}
 
-    candidate++;
-    if (attempts === maxAttempts) {
-      return solveResult(false, false, null, candidate, attempts);
-    }
-  }
+		candidate++;
+		if (attempts === maxAttempts) {
+			return solveResult(false, false, null, candidate, attempts);
+		}
+	}
 }
 
 async function solveSubtle(nonce, difficulty, startCounter, maxAttempts) {
-  const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
+	const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
 
-  if (subtle == null || typeof subtle.digest !== 'function') {
-    throw new Error('digest unavailable');
-  }
+	if (subtle == null || typeof subtle.digest !== 'function') {
+		throw new Error();
+	}
 
-  let attempts = 0;
-  let candidate = startCounter;
+	let attempts = 0;
+	let candidate = startCounter;
 
-  for (;;) {
-    const message = proofMessage(nonce, candidate);
-    const output = await subtle.digest('SHA-256', message);
-    const digest = new Uint8Array(output);
+	for (;;) {
+		const message = proofMessage(nonce, candidate);
+		const output = await subtle.digest('SHA-256', message);
+		const digest = new Uint8Array(output);
 
-    if (digest.length !== 32) {
-      throw new Error('digest failed');
-    }
+		if (digest.length !== 32) {
+			throw new Error();
+		}
 
-    attempts++;
+		attempts++;
 
-    if (meetsDifficulty(digest, difficulty)) {
-      return solveResult(true, false, candidate, null, attempts);
-    }
+		if (meetsDifficulty(digest, difficulty)) {
+			return solveResult(true, false, candidate, null, attempts);
+		}
 
-    if (candidate === Number.MAX_SAFE_INTEGER) {
-      return solveResult(false, true, null, null, attempts);
-    }
+		if (candidate === Number.MAX_SAFE_INTEGER) {
+			return solveResult(false, true, null, null, attempts);
+		}
 
-    candidate++;
-    if (attempts === maxAttempts) {
-      return solveResult(false, false, null, candidate, attempts);
-    }
-  }
+		candidate++;
+		if (attempts === maxAttempts) {
+			return solveResult(false, false, null, candidate, attempts);
+		}
+	}
 }
 
 async function solve(nonce, difficulty, startCounter, maxAttempts, backend) {
-  validateSolve(nonce, difficulty, startCounter, maxAttempts, backend);
-  const nonceCopy = nonce.slice();
+	validateSolve(nonce, difficulty, startCounter, maxAttempts, backend);
+	const nonceCopy = nonce.slice();
 
-  if (backend === 'js') {
-    return solveJs(nonceCopy, difficulty, startCounter, maxAttempts);
-  }
+	if (backend === 'js') {
+		return solveJs(nonceCopy, difficulty, startCounter, maxAttempts);
+	}
 
-  return solveSubtle(nonceCopy, difficulty, startCounter, maxAttempts);
+	return solveSubtle(nonceCopy, difficulty, startCounter, maxAttempts);
 }
 
 globalThis.PowGateSolver = Object.freeze({ sha256, solve });
 
 const proofName = '__pow_p';
 const alphabet =
-  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+	'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 const katNonceHex =
-  'c382cd45c32e81f6f5bdcc5fb29497876a3d4364b688245668ab1b578ff7184f';
+	'c382cd45c32e81f6f5bdcc5fb29497876a3d4364b688245668ab1b578ff7184f';
 const katDigestHex =
-  '0028df459a18ed1973ccbfb54439b98bef2e3988fb5072e2fd3b8a1368d275f5';
-let controllerState = 'initializing';
-let statusNode = null;
-let progressNode = null;
-let retryNode = null;
+	'0028df459a18ed1973ccbfb54439b98bef2e3988fb5072e2fd3b8a1368d275f5';
+let state = 'initializing';
+let status = null;
+let progress = null;
+let retry = null;
+let params = null;
+let selectedBackend = null;
+let nextCounter = 0;
+let totalAttempts = 0;
+let workBlock = 1;
+let scheduled = false;
+let miningRunning = false;
 
 function hexBytes(text) {
-  const bytes = new Uint8Array(text.length / 2);
+	const bytes = new Uint8Array(text.length / 2);
 
-  for (let index = 0; index < bytes.length; index++) {
-    bytes[index] = Number.parseInt(text.slice(index * 2, index * 2 + 2), 16);
-  }
+	for (let index = 0; index < bytes.length; index++) {
+		bytes[index] = Number.parseInt(text.slice(index * 2, index * 2 + 2), 16);
+	}
 
-  return bytes;
+	return bytes;
 }
 
 function bytesEqual(left, right) {
-  if (left.length !== right.length) {
-    return false;
-  }
-  for (let index = 0; index < left.length; index++) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-  return true;
+	if (left.length !== right.length) {
+		return false;
+	}
+	for (let index = 0; index < left.length; index++) {
+		if (left[index] !== right[index]) {
+			return false;
+		}
+	}
+	return true;
 }
 
 function decodeNonce(text) {
-  if (typeof text !== 'string' || text.length !== 43) {
-    throw new TypeError('nonce');
-  }
+	if (typeof text !== 'string' || text.length !== 43) {
+		throw new TypeError();
+	}
 
-  const values = new Uint8Array(43);
-  for (let index = 0; index < text.length; index++) {
-    values[index] = alphabet.indexOf(text[index]);
-    if (values[index] === 255) {
-      throw new TypeError('nonce');
-    }
-  }
-  if ((values[42] & 3) !== 0) {
-    throw new TypeError('nonce');
-  }
+	const values = new Uint8Array(43);
+	for (let index = 0; index < text.length; index++) {
+		values[index] = alphabet.indexOf(text[index]);
+		if (values[index] === 255) {
+			throw new TypeError();
+		}
+	}
+	if ((values[42] & 3) !== 0) {
+		throw new TypeError();
+	}
 
-  const output = new Uint8Array(32);
-  let out = 0;
-  for (let index = 0; index < 40; index += 4) {
-    output[out++] = (values[index] << 2) | (values[index + 1] >>> 4);
-    output[out++] = (values[index + 1] << 4) | (values[index + 2] >>> 2);
-    output[out++] = (values[index + 2] << 6) | values[index + 3];
-  }
-  output[out++] = (values[40] << 2) | (values[41] >>> 4);
-  output[out] = (values[41] << 4) | (values[42] >>> 2);
-  return output;
+	const output = new Uint8Array(32);
+	let out = 0;
+	for (let index = 0; index < 40; index += 4) {
+		output[out++] = (values[index] << 2) | (values[index + 1] >>> 4);
+		output[out++] = (values[index + 1] << 4) | (values[index + 2] >>> 2);
+		output[out++] = (values[index + 2] << 6) | values[index + 3];
+	}
+	output[out++] = (values[40] << 2) | (values[41] >>> 4);
+	output[out] = (values[41] << 4) | (values[42] >>> 2);
+	return output;
 }
 
 function parseParams() {
-  const node = document.getElementById('pow-params');
-  if (node == null) {
-    throw new TypeError('params');
-  }
+	const node = document.getElementById('pow-params');
+	if (node == null) {
+		throw new TypeError();
+	}
 
-  const value = JSON.parse(node.textContent);
-  if (value == null || Array.isArray(value)
-    || Object.keys(value).sort().join(',') !== 'b,d,n,v'
-    || value.v !== 1
-    || !Number.isInteger(value.d) || value.d < 1 || value.d > 32
-    || typeof value.b !== 'string'
-    || !/^(0|[1-9][0-9]{0,19})$/.test(value.b)
-    || (value.b.length === 20 && value.b > '18446744073709551615')) {
-    throw new TypeError('params');
-  }
+	const value = JSON.parse(node.textContent);
+	if (value == null || Array.isArray(value)
+		|| Object.keys(value).sort().join(',') !== 'b,d,n,v'
+		|| value.v !== 1
+		|| !Number.isInteger(value.d) || value.d < 1 || value.d > 32
+		|| typeof value.b !== 'string'
+		|| !/^(0|[1-9][0-9]{0,19})$/.test(value.b)
+		|| (value.b.length === 20 && value.b > '18446744073709551615')) {
+		throw new TypeError();
+	}
 
-  return Object.freeze({
-    v: value.v,
-    d: value.d,
-    b: value.b,
-    nonce: decodeNonce(value.n)
-  });
+	return Object.freeze({
+		v: value.v,
+		d: value.d,
+		b: value.b,
+		nonce: decodeNonce(value.n)
+	});
 }
 
 function proofValues(text) {
-  const values = [];
-  let cursor = 0;
+	const values = [];
+	let cursor = 0;
 
-  while (cursor <= text.length) {
-    let end = text.indexOf(';', cursor);
-    if (end === -1) {
-      end = text.length;
-    }
-    while (cursor < end
-      && (text.charCodeAt(cursor) === 0x20
-        || text.charCodeAt(cursor) === 0x09)) {
-      cursor++;
-    }
-    const prefix = `${proofName}=`;
-    if (text.slice(cursor, cursor + prefix.length) === prefix) {
-      values.push(text.slice(cursor + prefix.length, end));
-    }
-    if (end === text.length) {
-      break;
-    }
-    cursor = end + 1;
-  }
+	while (cursor <= text.length) {
+		let end = text.indexOf(';', cursor);
+		if (end === -1) {
+			end = text.length;
+		}
+		while (cursor < end
+			&& (text.charCodeAt(cursor) === 0x20
+				|| text.charCodeAt(cursor) === 0x09)) {
+			cursor++;
+		}
+		const prefix = `${proofName}=`;
+		if (text.slice(cursor, cursor + prefix.length) === prefix) {
+			values.push(text.slice(cursor + prefix.length, end));
+		}
+		if (end === text.length) {
+			break;
+		}
+		cursor = end + 1;
+	}
 
-  return values;
+	return values;
 }
 
 function pathCandidates(pathname) {
-  if (typeof pathname !== 'string' || !pathname.startsWith('/')) {
-    throw new TypeError('path');
-  }
-  for (let index = 0; index < pathname.length; index++) {
-    const code = pathname.charCodeAt(index);
-    if (code <= 0x20 || code === 0x7f || code === 0x3b) {
-      throw new TypeError('path');
-    }
-  }
+	if (typeof pathname !== 'string' || !pathname.startsWith('/')) {
+		throw new TypeError();
+	}
+	for (let index = 0; index < pathname.length; index++) {
+		const code = pathname.charCodeAt(index);
+		if (code <= 0x20 || code === 0x7f || code === 0x3b) {
+			throw new TypeError();
+		}
+	}
 
-  const paths = new Set(['/']);
-  for (let index = 1; index < pathname.length; index++) {
-    if (pathname[index] === '/') {
-      paths.add(pathname.slice(0, index));
-      paths.add(pathname.slice(0, index + 1));
-    }
-  }
-  paths.add(pathname);
-  return paths;
+	const paths = new Set(['/']);
+	for (let index = 1; index < pathname.length; index++) {
+		if (pathname[index] === '/') {
+			paths.add(pathname.slice(0, index));
+			paths.add(pathname.slice(0, index + 1));
+		}
+	}
+	paths.add(pathname);
+	return paths;
 }
 
 function clearProofCookies() {
-  const protocol = location.protocol;
-  if (protocol !== 'http:' && protocol !== 'https:') {
-    throw new TypeError('scheme');
-  }
-  const secure = protocol === 'https:' ? '; Secure' : '';
-  for (const path of pathCandidates(location.pathname)) {
-    document.cookie = `${proofName}=; Max-Age=0; Path=${path}; `
-      + `SameSite=Lax${secure}`;
-  }
-  if (proofValues(document.cookie).length !== 0) {
-    throw new Error('cookie cleanup');
-  }
+	const protocol = location.protocol;
+	if (protocol !== 'http:' && protocol !== 'https:') {
+		throw new TypeError();
+	}
+	const secure = protocol === 'https:' ? '; Secure' : '';
+	for (const path of pathCandidates(location.pathname)) {
+		document.cookie = `${proofName}=; Max-Age=0; Path=${path}; `
+			+ `SameSite=Lax${secure}`;
+	}
+	if (proofValues(document.cookie).length !== 0) {
+		throw new Error();
+	}
 }
 
 async function backendKat(backend, api) {
-  const message = proofMessage(hexBytes(katNonceHex), 34);
-  let digest;
+	const message = proofMessage(hexBytes(katNonceHex), 34);
+	let digest;
 
-  if (backend === 'js') {
-    digest = api.sha256(message);
-  } else {
-    const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
-    if (subtle == null || typeof subtle.digest !== 'function') {
-      throw new Error('digest unavailable');
-    }
-    digest = new Uint8Array(await subtle.digest('SHA-256', message));
-  }
+	if (backend === 'js') {
+		digest = api.sha256(message);
+	} else {
+		const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
+		if (subtle == null || typeof subtle.digest !== 'function') {
+			throw new Error();
+		}
+		digest = new Uint8Array(await subtle.digest('SHA-256', message));
+	}
 
-  if (!bytesEqual(digest, hexBytes(katDigestHex))
-    || !meetsDifficulty(digest, 8)) {
-    throw new Error('self-test');
-  }
+	if (!bytesEqual(digest, hexBytes(katDigestHex))
+		|| !meetsDifficulty(digest, 8)) {
+		throw new Error();
+	}
 }
 
 async function selectBackend(api) {
-  try {
-    await backendKat('js', api);
-    return 'js';
-  } catch (_error) {
-    await backendKat('subtle', api);
-    return 'subtle';
-  }
+	try {
+		await backendKat('js', api);
+		return 'js';
+	} catch (_error) {
+		await backendKat('subtle', api);
+		return 'subtle';
+	}
 }
 
 function failController() {
-  if (controllerState === 'reloading') {
-    return;
-  }
-  controllerState = 'failure';
-  if (statusNode != null) {
-    statusNode.textContent = 'Unable to complete the check.';
-  }
-  if (progressNode != null) {
-    progressNode.hidden = true;
-  }
-  if (retryNode != null) {
-    retryNode.hidden = false;
-  }
+	if (state === 'reloading') {
+		return;
+	}
+	state = 'failure';
+	if (status != null) {
+		status.textContent = 'Unable to complete the check.';
+	}
+	if (progress != null) {
+		progress.hidden = true;
+	}
+	if (retry != null) {
+		retry.hidden = false;
+	}
+}
+
+function updateProgress() {
+	const expected = 2 ** params.d;
+	progress.value = Math.min(0.99,
+		1 - Math.exp(-totalAttempts / expected));
+}
+
+function finishProof(counter) {
+	if (!Number.isSafeInteger(counter) || counter < 0) {
+		throw new Error();
+	}
+
+	state = 'success';
+	progress.value = 1;
+	const value = `1.${params.b}.${String(counter)}`;
+	const secure = location.protocol === 'https:' ? '; Secure' : '';
+	document.cookie = `${proofName}=${value}; Path=/; SameSite=Lax${secure}`;
+
+	const values = proofValues(document.cookie);
+	if (values.length !== 1 || values[0] !== value) {
+		throw new Error();
+	}
+
+	state = 'reloading';
+	location.reload();
+}
+
+function queueMining() {
+	if (state === 'mining' && !document.hidden
+		&& !scheduled && !miningRunning) {
+		scheduled = true;
+		setTimeout(mineSlice, 0);
+	}
+}
+
+async function mineSlice() {
+	scheduled = false;
+	if (state !== 'mining') {
+		return;
+	}
+	if (document.hidden) {
+		state = 'paused';
+		return;
+	}
+
+	miningRunning = true;
+	const deadline = performance.now() + 10;
+	try {
+		do {
+			const before = performance.now();
+			const result = await globalThis.PowGateSolver.solve(
+				params.nonce, params.d, nextCounter, workBlock,
+				selectedBackend);
+			const elapsed = Math.max(performance.now() - before, 0.25);
+
+			totalAttempts = Math.min(Number.MAX_SAFE_INTEGER,
+				totalAttempts + result.attempts);
+			if (result.found) {
+				finishProof(result.counter);
+				return;
+			}
+			if (result.exhausted) {
+				throw new Error();
+			}
+			nextCounter = result.nextCounter;
+			workBlock = Math.min(4096, Math.max(1,
+				Math.floor(result.attempts * 2 / elapsed)));
+		} while (state === 'mining' && !document.hidden
+			&& performance.now() < deadline);
+
+		updateProgress();
+		if (document.hidden) {
+			state = 'paused';
+		}
+	} catch (_error) {
+		failController();
+	} finally {
+		miningRunning = false;
+		queueMining();
+	}
+}
+
+function visibilityChanged() {
+	if (state === 'mining' && document.hidden) {
+		state = 'paused';
+	} else if (state === 'paused' && !document.hidden) {
+		state = 'mining';
+		queueMining();
+	}
 }
 
 async function startController() {
-  try {
-    statusNode = document.getElementById('pow-status');
-    progressNode = document.getElementById('pow-progress');
-    retryNode = document.getElementById('pow-retry');
-    if (statusNode == null || progressNode == null || retryNode == null) {
-      throw new Error('page');
-    }
+	try {
+		status = document.getElementById('pow-status');
+		progress = document.getElementById('pow-progress');
+		retry = document.getElementById('pow-retry');
+		if (status == null || progress == null || retry == null) {
+			throw new Error();
+		}
 
-    retryNode.addEventListener('click', () => {
-      if (controllerState === 'failure') {
-        controllerState = 'reloading';
-        location.reload();
-      }
-    });
+		retry.addEventListener('click', () => {
+			if (state === 'failure') {
+				state = 'reloading';
+				location.reload();
+			}
+		});
+		document.addEventListener('visibilitychange', visibilityChanged);
 
-    parseParams();
-    clearProofCookies();
-    await selectBackend(globalThis.PowGateSolver);
-    controllerState = 'mining';
-    statusNode.textContent = 'Checking your browser.';
-  } catch (_error) {
-    failController();
-  }
+		params = parseParams();
+		clearProofCookies();
+		selectedBackend = await selectBackend(globalThis.PowGateSolver);
+		status.textContent = 'Checking your browser.';
+		state = document.hidden ? 'paused' : 'mining';
+		queueMining();
+	} catch (_error) {
+		failController();
+	}
 }
 
 setTimeout(startController, 0);
