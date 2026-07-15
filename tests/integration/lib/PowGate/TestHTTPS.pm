@@ -205,7 +205,7 @@ sub _validate_request {
 
 sub _curl_transfer_arguments {
     my ($runtime, $protocol, $request, $header_path, $body_path,
-        $request_body_path, $host, $unix_socket) = @_;
+        $request_body_path, $host, $unix_socket, $resolve_to) = @_;
     my @arguments = (
         '--silent', '--show-error', '--insecure',
         '--max-time', '5', '--path-as-is',
@@ -221,6 +221,11 @@ sub _curl_transfer_arguments {
 
     if (defined $unix_socket) {
         push @arguments, '--unix-socket', $unix_socket;
+    }
+
+    if (defined $resolve_to) {
+        push @arguments, '--resolve',
+            "$host:$runtime->{port}:$resolve_to";
     }
 
     for my $header (@{$request->{headers} // []}) {
@@ -289,6 +294,7 @@ sub https_sequence {
     my $requests = $options{requests};
     my $host = $options{host} // 'localhost';
     my $unix_socket = $options{unix_socket};
+    my $resolve_to = $options{resolve_to};
     my @arguments = ('curl');
     my @artifacts;
     my @responses;
@@ -308,6 +314,9 @@ sub https_sequence {
     die "invalid Unix socket path"
         if defined $unix_socket
            && (ref($unix_socket) || $unix_socket =~ /[\x00\r\n]/);
+    die "invalid HTTPS resolve address"
+        if defined $resolve_to
+           && (ref($resolve_to) || $resolve_to =~ /[\x00\r\n]/);
 
     eval {
         for my $index (0 .. $#$requests) {
@@ -336,7 +345,7 @@ sub https_sequence {
             push @arguments, '--next' if $index != 0;
             push @arguments, _curl_transfer_arguments(
                 $runtime, $protocol, $request, $header_path, $body_path,
-                $request_body_path, $host, $unix_socket
+                $request_body_path, $host, $unix_socket, $resolve_to
             );
             push @responses, {
                 body_path => $body_path,
@@ -389,12 +398,14 @@ sub https_request {
     my $protocol = delete $options{protocol};
     my $host = delete $options{host};
     my $unix_socket = delete $options{unix_socket};
+    my $resolve_to = delete $options{resolve_to};
     my $response = https_sequence(
         $runtime,
         protocol => $protocol,
         requests => [\%options],
         defined($host) ? (host => $host) : (),
         defined($unix_socket) ? (unix_socket => $unix_socket) : (),
+        defined($resolve_to) ? (resolve_to => $resolve_to) : (),
     );
 
     return $response->[0];
