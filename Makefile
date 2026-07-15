@@ -16,7 +16,7 @@ COVERAGE_CFLAGS := $(PURE_CFLAGS) -O0 --coverage
 COVERAGE_LDFLAGS := --coverage
 
 .PHONY: check-policy check-test-env challenge-page module fault-modules \
-	test-tools test-unit \
+	test-tools test-unit browser-tools \
 	test-vector-python test-fuzz test-fuzz-long test-coverage \
 	test-integration test-js test-e2e asan check clean \
 	test-browser-feasibility test-browser-e2e benchmark-browser \
@@ -37,6 +37,15 @@ challenge-page: $(CHALLENGE_HEADER)
 test-tools:
 	python3 -m unittest -v tests.tools.test_build_pow_challenge \
 		tests.tools.test_refsolve
+
+$(BUILD_DIR)/browser-tools/cookie-occurrences: \
+		tests/browser/cookie_occurrences.c src/pow_cookie_scan.c \
+		src/pow_cookie_scan.h src/pow_protocol.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/browser/cookie_occurrences.c \
+		src/pow_cookie_scan.c -o $@
+
+browser-tools: $(BUILD_DIR)/browser-tools/cookie-occurrences
 
 $(BUILD_DIR)/tests/vector-v1.verified: tools/refsolve.py \
 		tests/vectors/v1.json
