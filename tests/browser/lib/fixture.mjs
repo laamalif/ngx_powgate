@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import https from 'node:https';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
 
@@ -13,6 +14,30 @@ import {
 
 
 const SAFE_TOKEN = /^[A-Za-z0-9_.-]+$/;
+const HOST_RESOLVER_RULE = 'MAP powgate.test 127.0.0.1,MAP gate.powgate.test 127.0.0.1,EXCLUDE localhost';
+const CHROMIUM_ARGUMENTS = Object.freeze([
+    '--disable-dev-shm-usage',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--disable-default-apps',
+    '--disable-domain-reliability',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--no-default-browser-check',
+    '--no-first-run',
+    `--host-resolver-rules=${HOST_RESOLVER_RULE}`,
+]);
+const PROHIBITED_CHROMIUM_ARGUMENTS = Object.freeze([
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--single-process',
+    '--no-zygote',
+    '--disable-seccomp-filter-sandbox',
+    '--disable-namespace-sandbox',
+]);
+const requireFromBrowserImage = createRequire(
+    '/opt/ngx-powgate/browser/package.json',
+);
 
 const transitions = Object.freeze({
     created: new Set(['starting']),
@@ -181,6 +206,10 @@ async function createRuntimePaths(target) {
     const content = path.join(root, 'content');
     const certificates = path.join(root, 'certificates');
     const logs = path.join(root, 'logs');
+    const chromiumProfile = path.join(root, 'chromium-profile');
+    const chromiumHome = path.join(root, 'chromium-home');
+    const chromiumConfig = path.join(chromiumHome, '.config');
+    const chromiumCache = path.join(chromiumHome, '.cache');
     const clientBodyTemp = path.join(nginxPrefix, 'client_body_temp');
     const proxyTemp = path.join(nginxPrefix, 'proxy_temp');
     const fastcgiTemp = path.join(nginxPrefix, 'fastcgi_temp');
@@ -191,6 +220,9 @@ async function createRuntimePaths(target) {
         fs.mkdir(content, { recursive: true }),
         fs.mkdir(certificates, { recursive: true }),
         fs.mkdir(logs, { recursive: true }),
+        fs.mkdir(chromiumProfile, { recursive: true }),
+        fs.mkdir(chromiumConfig, { recursive: true }),
+        fs.mkdir(chromiumCache, { recursive: true }),
         fs.mkdir(clientBodyTemp, { recursive: true }),
         fs.mkdir(proxyTemp, { recursive: true }),
         fs.mkdir(fastcgiTemp, { recursive: true }),
@@ -203,6 +235,10 @@ async function createRuntimePaths(target) {
         content,
         certificates,
         logs,
+        chromiumProfile,
+        chromiumHome,
+        chromiumConfig,
+        chromiumCache,
         certificate: path.join(certificates, 'fixture.crt'),
         privateKey: path.join(certificates, 'fixture.key'),
         nginxConfig: path.join(nginxPrefix, 'nginx.conf'),
@@ -387,6 +423,410 @@ async function waitForNginxReady(runtime) {
 }
 
 
+async function readProcessStatus(pid) {
+    const text = await fs.readFile(`/proc/${pid}/status`, 'utf8');
+    const values = {};
+    for (const line of text.split('\n')) {
+        const separator = line.indexOf(':');
+        if (separator > 0) {
+            values[line.slice(0, separator)] = line.slice(separator + 1).trim();
+        }
+    }
+    return Object.freeze({
+        uid: values.Uid ?? '',
+        gid: values.Gid ?? '',
+        noNewPrivs: values.NoNewPrivs ?? '',
+        seccomp: values.Seccomp ?? '',
+        capEff: values.CapEff ?? '',
+    });
+}
+
+
+function scrubChromiumEnvironment(environment, paths) {
+    const scrubbed = { ...environment };
+    for (const name of [
+        'ASAN_OPTIONS',
+        'UBSAN_OPTIONS',
+        'LSAN_OPTIONS',
+        'MSAN_OPTIONS',
+        'LD_PRELOAD',
+        'ASAN_SYMBOLIZER_PATH',
+        'UBSAN_SYMBOLIZER_PATH',
+        'LLVM_SYMBOLIZER_PATH',
+    ]) {
+        delete scrubbed[name];
+    }
+    scrubbed.HOME = paths.chromiumHome;
+    scrubbed.XDG_CONFIG_HOME = paths.chromiumConfig;
+    scrubbed.XDG_CACHE_HOME = paths.chromiumCache;
+    return scrubbed;
+}
+
+
+async function chromiumProcessesForRuntime(runtimeRoot) {
+    const identities = [];
+    for (const entry of await fs.readdir('/proc')) {
+        if (!/^\d+$/u.test(entry)) {
+            continue;
+        }
+        try {
+            const identity = await readProcessIdentity(Number.parseInt(entry, 10));
+            const owned = identity.commandLine.some((value) =>
+                value.includes(runtimeRoot));
+            const chromium = identity.executable.includes('/chromium')
+                || identity.executable.endsWith('/chrome_crashpad_handler');
+            if (owned && chromium) {
+                identities.push(identity);
+            }
+        } catch (error) {
+            if (error?.code !== 'ENOENT' && error?.code !== 'ESRCH') {
+                throw error;
+            }
+        }
+    }
+    return identities;
+}
+
+
+async function waitForRenderer(master) {
+    return withDeadline(
+        'chromium_renderer', DEADLINES.chromium_launch, async (signal) => {
+        while (!signal.aborted) {
+            const descendants = await descendantsOf(master);
+            const renderer = descendants.find((identity) =>
+                identity.commandLine.some((value) =>
+                    value.split(/\s+/u).includes('--type=renderer')));
+            if (renderer !== undefined) {
+                return Object.freeze({ descendants, renderer });
+            }
+            await delay(25);
+        }
+        throw fixedFailure(
+            'sandbox_policy', 'chromium_renderer',
+            'Chromium renderer was not observed',
+        );
+    });
+}
+
+
+class BrowserSession {
+    constructor(runtime, options) {
+        this.runtime = runtime;
+        this.options = options;
+        this.browser = null;
+        this.context = null;
+        this.page = null;
+        this.cdp = null;
+        this.observations = new ObservationBuffer();
+        this.documentResponses = [];
+        this.master = null;
+        this.descendants = [];
+        this.ownedProcesses = [];
+        this.renderer = null;
+        this.sandbox = null;
+        this.browserVersion = null;
+        this.closed = false;
+        this.observationFailure = null;
+        this.expectedDisconnect = false;
+        this.pages = new Set();
+        this.cdpSessions = new Set();
+    }
+
+    #record(event) {
+        try {
+            this.observations.record(event);
+        } catch (error) {
+            this.observationFailure ??= error;
+        }
+    }
+
+    #observePage(page) {
+        this.pages.add(page);
+        const allowedConsole = new Set(
+            this.options.observe?.consoleIdentifiers ?? [],
+        );
+        const allowedErrors = new Set(
+            this.options.observe?.pageErrorIdentifiers ?? [],
+        );
+        page.on('console', (message) => {
+            const text = message.text();
+            const cspIdentifier = this.options.observe?.allowCspConsole === true
+                && (text.startsWith('Refused to execute inline script')
+                    || text.includes('Content Security Policy'))
+                ? 'csp_enforcement' : null;
+            const networkIdentifier = this.options.observe
+                ?.allowNetworkFailureConsole === true
+                && text.startsWith('Failed to load resource:')
+                ? 'network_failure' : null;
+            this.#record(Object.freeze({
+                type: 'console',
+                consoleType: message.type(),
+                identifier: allowedConsole.has(text) ? text
+                    : cspIdentifier ?? networkIdentifier ?? 'unexpected',
+            }));
+        });
+        page.on('pageerror', (error) => {
+            const identifier = [...allowedErrors].find((value) =>
+                error.message === value || error.message.endsWith(value));
+            this.#record(Object.freeze({
+                type: 'page_error',
+                identifier: identifier ?? 'unexpected',
+            }));
+        });
+        page.on('error', () => this.#record(Object.freeze({
+            type: 'page_crash',
+        })));
+        page.on('requestfailed', (request) => this.#record(Object.freeze({
+            type: 'request_failure',
+            resourceType: request.resourceType(),
+        })));
+    }
+
+    async #attachCdp(page) {
+        const cdp = await withDeadline(
+            'cdp_operation', DEADLINES.cdp_operation,
+            () => page.createCDPSession(),
+        );
+        this.cdpSessions.add(cdp);
+        await withDeadline(
+            'cdp_operation', DEADLINES.cdp_operation,
+            async () => {
+                await cdp.send('Network.enable');
+                await cdp.send('Audits.enable');
+            },
+        );
+        cdp.on('Network.responseReceived', (event) => {
+            if (event.type === 'Document') {
+                this.documentResponses.push(Object.freeze({
+                    requestId: event.requestId,
+                    url: event.response.url,
+                    protocol: event.response.protocol,
+                    status: event.response.status,
+                }));
+            }
+        });
+        cdp.on('Audits.issueAdded', (event) => {
+            if (event.issue?.code === 'ContentSecurityPolicyIssue') {
+                this.#record(Object.freeze({ type: 'csp_violation' }));
+            }
+        });
+        return cdp;
+    }
+
+    async start() {
+        const puppeteer = requireFromBrowserImage('puppeteer-core');
+        const arguments_ = buildChromiumLaunchArguments(this.options);
+        const environment = scrubChromiumEnvironment(
+            process.env, this.runtime.paths,
+        );
+        this.browser = await withDeadline(
+            'chromium_launch', DEADLINES.chromium_launch,
+            () => puppeteer.launch({
+                executablePath: '/usr/bin/chromium',
+                headless: true,
+                acceptInsecureCerts: true,
+                userDataDir: this.runtime.paths.chromiumProfile,
+                args: arguments_,
+                env: environment,
+                timeout: DEADLINES.chromium_launch,
+                handleSIGINT: false,
+                handleSIGTERM: false,
+                handleSIGHUP: false,
+            }),
+        );
+        this.browser.once('disconnected', () => this.#record(Object.freeze({
+            type: 'browser_disconnected',
+        })));
+        this.browser.on('targetdestroyed', (target) => this.#record(Object.freeze({
+            type: 'target_destroyed',
+            targetType: target.type(),
+        })));
+        const browserProcess = this.browser.process();
+        if (browserProcess === null || !Number.isSafeInteger(browserProcess.pid)) {
+            throw fixedFailure(
+                'browser_pairing', 'chromium_process',
+                'Chromium process identity is unavailable',
+            );
+        }
+        this.master = await readProcessIdentity(browserProcess.pid);
+        validateChromiumProcessArguments(this.master.commandLine);
+        this.context = await withDeadline(
+            'browser_context', DEADLINES.browser_context,
+            () => this.browser.createBrowserContext(),
+        );
+        this.page = await withDeadline(
+            'browser_context', DEADLINES.browser_context,
+            () => this.context.newPage(),
+        );
+        this.#observePage(this.page);
+        this.cdp = await this.#attachCdp(this.page);
+        const version = await withDeadline(
+            'cdp_operation', DEADLINES.cdp_operation,
+            () => this.cdp.send('Browser.getVersion'),
+        );
+        this.browserVersion = version.product;
+        const processes = await waitForRenderer(this.master);
+        this.descendants = processes.descendants;
+        this.renderer = processes.renderer;
+        this.ownedProcesses = await chromiumProcessesForRuntime(
+            this.runtime.paths.root,
+        );
+        for (const identity of this.ownedProcesses) {
+            validateChromiumProcessArguments(identity.commandLine);
+        }
+        const [controllerStatus, rendererStatus] = await Promise.all([
+            readProcessStatus(process.pid),
+            readProcessStatus(this.renderer.pid),
+        ]);
+        if (rendererStatus.seccomp !== '2'
+            || rendererStatus.capEff !== '0000000000000000'
+            || controllerStatus.seccomp !== '2'
+            || controllerStatus.capEff !== '0000000000000000') {
+            throw fixedFailure(
+                'sandbox_policy', 'chromium_sandbox',
+                'observable Chromium sandbox properties failed',
+            );
+        }
+        this.sandbox = Object.freeze({
+            controller: controllerStatus,
+            renderer: rendererStatus,
+            separateRenderer: this.renderer.pid !== this.master.pid,
+        });
+        return this;
+    }
+
+    async createPage() {
+        this.assertHealthy();
+        const page = await withDeadline(
+            'browser_context', DEADLINES.browser_context,
+            () => this.context.newPage(),
+        );
+        this.#observePage(page);
+        const cdp = await this.#attachCdp(page);
+        return Object.freeze({ page, cdp });
+    }
+
+    waitForDocument(url, startIndex = 0) {
+        return withDeadline(
+            'cdp_operation', DEADLINES.cdp_operation, async (signal) => {
+            while (!signal.aborted) {
+                const response = this.documentResponses.slice(startIndex)
+                    .find((entry) => entry.url === url);
+                if (response !== undefined) {
+                    return response;
+                }
+                await delay(10);
+            }
+            throw fixedFailure(
+                'protocol_assertion', 'document_protocol',
+                'document protocol observation missing',
+            );
+        });
+    }
+
+    assertHealthy() {
+        if (this.observationFailure !== null) {
+            throw this.observationFailure;
+        }
+        if (this.browser !== null && !this.browser.connected
+            && !this.expectedDisconnect) {
+            throw fixedFailure(
+                'browser_runtime', 'chromium_connection',
+                'Chromium disconnected unexpectedly',
+            );
+        }
+    }
+
+    async disconnectForProbe() {
+        this.assertHealthy();
+        this.expectedDisconnect = true;
+        await withDeadline(
+            'chromium_close', DEADLINES.chromium_close,
+            () => this.browser.close(),
+        );
+    }
+
+    async close() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
+        let failure;
+        const connected = this.browser !== null && this.browser.connected;
+        for (const cdp of connected ? [...this.cdpSessions].reverse() : []) {
+            try {
+                await withDeadline(
+                    'cdp_operation', DEADLINES.cdp_operation,
+                    () => cdp.detach(),
+                );
+            } catch (error) {
+                failure ??= error;
+            }
+        }
+        for (const page of connected ? [...this.pages].reverse() : []) {
+            try {
+                if (!page.isClosed()) {
+                    await withDeadline(
+                        'page_context_close', DEADLINES.page_context_close,
+                        () => page.close(),
+                    );
+                }
+            } catch (error) {
+                failure ??= error;
+            }
+        }
+        if (this.context !== null && connected) {
+            try {
+                await withDeadline(
+                    'page_context_close', DEADLINES.page_context_close,
+                    () => this.context.close(),
+                );
+            } catch (error) {
+                failure ??= error;
+            }
+        }
+        if (this.browser !== null && connected) {
+            try {
+                await withDeadline(
+                    'chromium_close', DEADLINES.chromium_close,
+                    () => this.browser.close(),
+                );
+            } catch (error) {
+                failure ??= error;
+            }
+        }
+        if (this.master !== null && await identityStillMatches(this.master)) {
+            failure ??= fixedFailure(
+                'cleanup', 'chromium_close',
+                'Chromium remained after browser close',
+            );
+            await signalVerifiedProcess(this.master, 'SIGTERM');
+            if (!await waitUntilGone(this.master, 5000)) {
+                await signalVerifiedProcess(this.master, 'SIGKILL');
+                await waitUntilGone(this.master, 2000);
+            }
+        }
+        for (const identity of this.ownedProcesses) {
+            if (await identityStillMatches(identity)) {
+                failure ??= fixedFailure(
+                    'cleanup', 'chromium_close',
+                    'Chromium helper remained after browser close',
+                );
+                await signalVerifiedProcess(identity, 'SIGTERM');
+                if (!await waitUntilGone(identity, 2000)) {
+                    await signalVerifiedProcess(identity, 'SIGKILL');
+                    await waitUntilGone(identity, 1000);
+                }
+            }
+        }
+        this.runtime.browserSessions.delete(this);
+        if (failure !== undefined) {
+            throw failure;
+        }
+    }
+}
+
+
 class NginxFixtureRuntime {
     constructor(options) {
         if (options === null || typeof options !== 'object'
@@ -407,6 +847,7 @@ class NginxFixtureRuntime {
             cleanupEscalated: false,
         };
         this.diagnosticPath = null;
+        this.browserSessions = new Set();
     }
 
     async start() {
@@ -521,6 +962,20 @@ class NginxFixtureRuntime {
             origin: this.origin,
             ports: this.ports,
             nginx: this.nginx,
+            createBrowserSession: async (options) => {
+                const session = new BrowserSession(this, options);
+                this.browserSessions.add(session);
+                try {
+                    return await session.start();
+                } catch (error) {
+                    try {
+                        await session.close();
+                    } catch {
+                        /* the startup failure remains primary */
+                    }
+                    throw error;
+                }
+            },
         });
     }
 
@@ -554,6 +1009,15 @@ class NginxFixtureRuntime {
 
     async cleanup() {
         let cleanupFailure;
+        for (const session of [...this.browserSessions].reverse()) {
+            try {
+                await session.close();
+            } catch (error) {
+                cleanupFailure ??= classifySecondary(
+                    'cleanup', 'chromium_close', error,
+                );
+            }
+        }
         if (this.reservations !== null) {
             await this.reservations.close();
             this.reservations = null;
@@ -634,6 +1098,158 @@ export class BrowserTestFailure extends Error {
         this.diagnosticFailures = [];
         this.cleanupFailures = [];
         Object.freeze(this);
+    }
+}
+
+
+export function validateChromiumProcessArguments(arguments_) {
+    if (!Array.isArray(arguments_)
+        || arguments_.some((argument) => typeof argument !== 'string')) {
+        throw new TypeError('invalid Chromium arguments');
+    }
+    const tokens = arguments_.flatMap((argument) => argument.split(/\s+/u));
+    for (const argument of tokens) {
+        for (const prohibited of PROHIBITED_CHROMIUM_ARGUMENTS) {
+            if (argument === prohibited || argument.startsWith(`${prohibited}=`)) {
+                throw fixedFailure(
+                    'sandbox_policy', 'chromium_arguments',
+                    `prohibited Chromium argument: ${prohibited}`,
+                );
+            }
+        }
+    }
+}
+
+
+export function buildChromiumLaunchArguments(options) {
+    if (options === null || typeof options !== 'object'
+        || (options.protocolMode !== 'h1' && options.protocolMode !== 'h2')) {
+        throw new TypeError('invalid Chromium launch options');
+    }
+    if (options.extraArguments !== undefined
+        && (!Array.isArray(options.extraArguments)
+            || options.extraArguments.length !== 0)) {
+        validateChromiumProcessArguments(options.extraArguments ?? []);
+        throw fixedFailure(
+            'sandbox_policy', 'chromium_arguments',
+            'additional Chromium arguments are forbidden',
+        );
+    }
+    const arguments_ = [...CHROMIUM_ARGUMENTS];
+    if (options.protocolMode === 'h1') {
+        arguments_.push('--disable-http2');
+    }
+    validateChromiumProcessArguments(arguments_);
+    return Object.freeze(arguments_);
+}
+
+
+export class ObservationBuffer {
+    #events = [];
+    #metadataBytes = 0;
+    #maxEvents;
+    #maxBytes;
+    #waiters = new Set();
+
+    constructor(options = {}) {
+        this.#maxEvents = options.maxEvents
+            ?? CAPTURE_LIMITS.max_observation_events_per_page;
+        this.#maxBytes = options.maxBytes
+            ?? CAPTURE_LIMITS.max_observation_metadata_bytes_per_page;
+        if (!Number.isSafeInteger(this.#maxEvents) || this.#maxEvents <= 0
+            || !Number.isSafeInteger(this.#maxBytes) || this.#maxBytes <= 0) {
+            throw new TypeError('invalid observation limits');
+        }
+    }
+
+    record(event) {
+        if (event === null || typeof event !== 'object' || Array.isArray(event)) {
+            throw new TypeError('invalid observation event');
+        }
+        if (this.#events.length >= this.#maxEvents) {
+            throw fixedFailure(
+                'internal_invariant', 'observation_buffer',
+                'observation event limit exceeded',
+            );
+        }
+        const bytes = Buffer.byteLength(JSON.stringify(event), 'utf8');
+        if (this.#metadataBytes + bytes > this.#maxBytes) {
+            throw fixedFailure(
+                'internal_invariant', 'observation_buffer',
+                'observation metadata limit exceeded',
+            );
+        }
+        const frozen = deepFreeze({ ...event });
+        this.#events.push(frozen);
+        this.#metadataBytes += bytes;
+        for (const waiter of [...this.#waiters]) {
+            if (!waiter.window.closed && waiter.predicate(frozen)) {
+                clearTimeout(waiter.timer);
+                this.#waiters.delete(waiter);
+                waiter.resolve(frozen);
+            }
+        }
+        return frozen;
+    }
+
+    openWindow(name) {
+        safeToken(name, 'observation_window');
+        const buffer = this;
+        const window = {
+            name,
+            cursor: this.#events.length,
+            closed: false,
+            snapshot() {
+                if (this.closed) {
+                    throw new Error('closed observation window');
+                }
+                return buffer.#events.slice(this.cursor);
+            },
+            waitFor(predicate, milliseconds = DEADLINES.controlled_probe) {
+                if (this.closed || typeof predicate !== 'function'
+                    || !Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
+                    throw new TypeError('invalid observation wait');
+                }
+                const existing = this.snapshot().find(predicate);
+                if (existing !== undefined) {
+                    return Promise.resolve(existing);
+                }
+                return new Promise((resolve, reject) => {
+                    const waiter = {
+                        window: this,
+                        predicate,
+                        resolve,
+                        reject,
+                        timer: null,
+                    };
+                    waiter.timer = setTimeout(() => {
+                        buffer.#waiters.delete(waiter);
+                        reject(fixedFailure(
+                            'browser_runtime', name,
+                            `operation deadline exceeded: ${name}`,
+                        ));
+                    }, milliseconds);
+                    buffer.#waiters.add(waiter);
+                });
+            },
+            close() {
+                if (this.closed) {
+                    return;
+                }
+                this.closed = true;
+                for (const waiter of [...buffer.#waiters]) {
+                    if (waiter.window === this) {
+                        clearTimeout(waiter.timer);
+                        buffer.#waiters.delete(waiter);
+                        waiter.reject(fixedFailure(
+                            'browser_runtime', name,
+                            `observation window closed: ${name}`,
+                        ));
+                    }
+                }
+            },
+        };
+        return window;
     }
 }
 

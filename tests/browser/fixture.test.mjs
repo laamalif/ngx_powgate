@@ -18,11 +18,14 @@ import {
 import {
     BrowserTestFailure,
     FixtureTransaction,
+    ObservationBuffer,
+    buildChromiumLaunchArguments,
     buildDiagnosticBundle,
     identityStillMatches,
     isNginxBindCollision,
     readProcessIdentity,
     signalVerifiedProcess,
+    validateChromiumProcessArguments,
     withDeadline,
     withFixture,
 } from './lib/fixture.mjs';
@@ -336,4 +339,88 @@ http {
     assert.equal(observed.nginx.cleanupEscalated, false);
     assert.equal(await identityStillMatches(observed.nginx.master), false);
     await assert.rejects(fs.stat(observed.paths.root), { code: 'ENOENT' });
+});
+
+
+test('Chromium launch policy is exact and rejects weakening', () => {
+    const common = [
+        '--disable-dev-shm-usage',
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-default-apps',
+        '--disable-domain-reliability',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--no-default-browser-check',
+        '--no-first-run',
+        '--host-resolver-rules=MAP powgate.test 127.0.0.1,MAP gate.powgate.test 127.0.0.1,EXCLUDE localhost',
+    ];
+    assert.deepEqual(buildChromiumLaunchArguments({ protocolMode: 'h2' }), common);
+    assert.deepEqual(
+        buildChromiumLaunchArguments({ protocolMode: 'h1' }),
+        [...common, '--disable-http2'],
+    );
+    assert.throws(
+        () => buildChromiumLaunchArguments({
+            protocolMode: 'h2', extraArguments: ['--no-sandbox'],
+        }),
+        (error) => error instanceof BrowserTestFailure
+            && error.category === 'sandbox_policy',
+    );
+    for (const argument of [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--single-process',
+        '--no-zygote',
+        '--disable-seccomp-filter-sandbox',
+        '--disable-namespace-sandbox',
+    ]) {
+        assert.throws(
+            () => validateChromiumProcessArguments(['/usr/bin/chromium', argument]),
+            /prohibited Chromium argument/,
+        );
+    }
+    assert.throws(
+        () => validateChromiumProcessArguments([
+            '/usr/lib/chromium/chromium --type=renderer --no-sandbox',
+        ]),
+        /prohibited Chromium argument/,
+    );
+    assert.doesNotThrow(() => validateChromiumProcessArguments([
+        '/usr/bin/chromium', '--type=renderer', '--renderer-client-id=4',
+    ]));
+});
+
+
+test('observation windows consume only their own bounded events', async () => {
+    const observations = new ObservationBuffer({ maxEvents: 3, maxBytes: 1024 });
+    const first = observations.openWindow('first_probe');
+    observations.record(Object.freeze({ type: 'console', identifier: 'first' }));
+    assert.equal(
+        (await first.waitFor((event) => event.identifier === 'first')).identifier,
+        'first',
+    );
+    first.close();
+
+    const second = observations.openWindow('second_probe');
+    assert.deepEqual(second.snapshot(), []);
+    observations.record(Object.freeze({ type: 'page_error', identifier: 'second' }));
+    assert.equal(
+        (await second.waitFor((event) => event.identifier === 'second')).type,
+        'page_error',
+    );
+    second.close();
+    assert.throws(() => second.snapshot(), /closed observation window/);
+
+    observations.record(Object.freeze({ type: 'request_failure' }));
+    assert.throws(
+        () => observations.record(Object.freeze({ type: 'overflow' })),
+        (error) => error instanceof BrowserTestFailure
+            && error.category === 'internal_invariant',
+    );
+    const bytes = new ObservationBuffer({ maxEvents: 10, maxBytes: 24 });
+    assert.throws(
+        () => bytes.record(Object.freeze({ type: 'x'.repeat(40) })),
+        /metadata limit exceeded/,
+    );
 });
