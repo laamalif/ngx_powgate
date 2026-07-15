@@ -529,6 +529,12 @@ and non-applicability to `https://powgate.test/` through the browser cookie
 API. An opaque or normalized-away partition key fails the pinned-environment
 contract rather than weakening the assertion.
 
+One checked-in immutable cookie descriptor owns the exact structured
+partition-key representation demonstrated by `5b14254`, including origin
+serialization. The spike, focused equivalence contract, and permanent matrix
+import that descriptor. They never reconstruct or loosely normalize an
+independent expected representation.
+
 Before production cleanup, the case proves the cookie is stored, exactly one
 proof occurrence is page-visible through `document.cookie`, and the initial
 request contains one exact proof occurrence according to the production
@@ -550,7 +556,9 @@ untouched.
 
 The expected terminal result is:
 
-- partitioned cookie stored, initially visible, and present on the request;
+- partitioned cookie stored and initially visible, with
+  `initial_request_proof_count = 1` from the server-received Cookie bytes and
+  production scanner;
 - partitioned cookie still stored and page-visible after cleanup;
 - namespace assigned exactly once and solver called zero times;
 - exactly one challenge-phase document navigation and zero backend requests;

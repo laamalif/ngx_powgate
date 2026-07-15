@@ -68,6 +68,12 @@ jointly prove host-only scope. An opaque partition key or a representation that
 does not expose the structured source origin fails this pinned-environment
 contract. No assertion is weakened to accept an ambiguous normalized value.
 
+The checked-in immutable cookie descriptor owns the exact expected structured
+partition-key representation demonstrated by `5b14254`, including origin
+serialization. The spike, focused equivalence contract, and permanent matrix
+import that same constant. No independently reconstructed, coerced, or loosely
+normalized representation is accepted.
+
 ## Mandatory state and terminal behavior
 
 Before production cleanup, each case proves:
@@ -75,8 +81,13 @@ Before production cleanup, each case proves:
 ```text
 partitioned_cookie_stored = true
 initial_document_visible = true
-initial_request_present = true
+initial_request_proof_count = 1
 ```
+
+`initial_request_proof_count` is computed from the server-received Cookie
+representation using the NGINX-free production scanner. It proves both
+presence and absence of an unexpected duplicate; browser storage metadata or
+a simplified string split is not a substitute.
 
 After the cleanup attempt, each case proves:
 

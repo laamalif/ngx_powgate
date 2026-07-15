@@ -104,6 +104,10 @@ created. The historical implementation field named `navigation_count` means
 challenge-phase document navigations only; the permanent contract uses the
 unambiguous `challenge_phase_document_navigation_count` name.
 
+Likewise, historical `initial_request_present` recorded a production-scanner
+count equal to one. The permanent contract exposes that stronger meaning
+directly as `initial_request_proof_count = 1`.
+
 The experimental target reports the complete fixed verdict record and exits
 zero when the experiment executed correctly, regardless of whether the
 acceptance tuple was reached. Environment, fixture, protocol, observer,
