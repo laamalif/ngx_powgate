@@ -30,7 +30,7 @@ if [ -z "$all_files" ]; then
 fi
 
 pure_files=$(printf '%s\n' "$all_files" \
-    | grep -E '/(pow_crypto|pow_parse|pow_cookie|pow_cookie_scan|pow_challenge)\.[ch]$')
+    | grep -E '/(pow_crypto|pow_parse|pow_cookie|pow_cookie_scan|pow_challenge|pow_verify)\.[ch]$')
 
 pure_headers=$(printf '%s\n' "$pure_files" | grep -E '\.h$')
 

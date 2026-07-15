@@ -5,6 +5,7 @@
 #include "pow_cookie.h"
 #include "pow_parse.h"
 #include "pow_protocol.h"
+#include "pow_verify.h"
 #include "test.h"
 
 
@@ -221,42 +222,75 @@ test_verify_secrets_and_policy(void)
     TEST_ASSERT(build_and_parse(current, UINT64_C(1800000000), 8, 56,
                                 &parsed, wire) == 1);
     TEST_ASSERT(pow_cookie_verify(current, NULL, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 56) == 1);
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_VALID);
     TEST_ASSERT(pow_cookie_verify(wrong, current, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 56) == 1);
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_VALID);
     TEST_ASSERT(pow_cookie_verify(wrong, NULL, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 56) == 0);
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_INVALID);
     TEST_ASSERT(pow_cookie_verify(wrong, previous, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 56) == 0);
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_INVALID);
     TEST_ASSERT(pow_cookie_verify(current, NULL, &parsed, vector_ip,
-                                  UINT64_C(1800000000), 8, 56) == 0);
+                                  UINT64_C(1800000000), 8, 56)
+                == POW_VERIFY_INVALID);
     TEST_ASSERT(pow_cookie_verify(current, NULL, &parsed, vector_ip,
-                                  UINT64_C(1800000001), 8, 56) == 0);
+                                  UINT64_C(1800000001), 8, 56)
+                == POW_VERIFY_INVALID);
     TEST_ASSERT(pow_cookie_verify(current, NULL, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 9, 56) == 0);
+                                  UINT64_C(1799999999), 9, 56)
+                == POW_VERIFY_INVALID);
     TEST_ASSERT(pow_cookie_verify(current, NULL, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 57) == 0);
+                                  UINT64_C(1799999999), 8, 57)
+                == POW_VERIFY_INVALID);
 
     for (i = 0; i < sizeof(wrong_ip); i++) {
         wrong_ip[i] = vector_ip[i];
     }
     wrong_ip[6] ^= 1;
     TEST_ASSERT(pow_cookie_verify(current, NULL, &parsed, wrong_ip,
-                                  UINT64_C(1799999999), 8, 56) == 0);
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_INVALID);
 
     TEST_ASSERT(build_and_parse(previous, UINT64_C(1800000000), 9, 64,
                                 &parsed, wire) == 1);
     TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 56) == 1);
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_VALID);
 
     TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 0, 56) == 0);
+                                  UINT64_C(1799999999), 0, 56)
+                == POW_VERIFY_ERROR);
     TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 33, 56) == 0);
+                                  UINT64_C(1799999999), 33, 56)
+                == POW_VERIFY_ERROR);
     TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 31) == 0);
+                                  UINT64_C(1799999999), 8, 31)
+                == POW_VERIFY_ERROR);
     TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, vector_ip,
-                                  UINT64_C(1799999999), 8, 129) == 0);
+                                  UINT64_C(1799999999), 8, 129)
+                == POW_VERIFY_ERROR);
+    TEST_ASSERT(pow_cookie_verify(NULL, previous, &parsed, vector_ip,
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_ERROR);
+    TEST_ASSERT(pow_cookie_verify(current, previous, NULL, vector_ip,
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_ERROR);
+    TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, NULL,
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_ERROR);
+
+    parsed.difficulty = 0;
+    TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, vector_ip,
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_ERROR);
+    parsed.difficulty = 9;
+    parsed.plen = 129;
+    TEST_ASSERT(pow_cookie_verify(current, previous, &parsed, vector_ip,
+                                  UINT64_C(1799999999), 8, 56)
+                == POW_VERIFY_ERROR);
 
     return 0;
 }
@@ -283,7 +317,8 @@ test_every_wire_mutation_fails(void)
 
         if (pow_cookie_parse(mutated, sizeof(mutated), &parsed) == 1) {
             TEST_ASSERT(pow_cookie_verify(secret, NULL, &parsed, vector_ip,
-                                          UINT64_C(1799999999), 8, 56) == 0);
+                                          UINT64_C(1799999999), 8, 56)
+                        == POW_VERIFY_INVALID);
         }
     }
 

@@ -80,6 +80,14 @@ $(BUILD_DIR)/tests/test_cookie_scan: tests/unit/test_cookie_scan.c \
 	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_cookie_scan.c \
 		src/pow_cookie_scan.c -o $@
 
+$(BUILD_DIR)/tests/test_verify_errors: tests/unit/test_verify_errors.c \
+		tests/unit/pow_crypto_fail.c src/pow_cookie.c src/pow_challenge.c \
+		src/pow_parse.c src/pow_verify.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_verify_errors.c \
+		tests/unit/pow_crypto_fail.c src/pow_cookie.c \
+		src/pow_challenge.c src/pow_parse.c -o $@
+
 $(BUILD_DIR)/tests/vector_v1.h: tests/vectors/v1.json tools/vector-to-c.py \
 		$(BUILD_DIR)/tests/vector-v1.verified
 	python3 tools/vector-to-c.py tests/vectors/v1.json $@
@@ -95,12 +103,14 @@ $(BUILD_DIR)/tests/test_vector: tests/unit/test_vector.c \
 
 test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto \
 		$(BUILD_DIR)/tests/test_challenge $(BUILD_DIR)/tests/test_cookie \
-		$(BUILD_DIR)/tests/test_cookie_scan $(BUILD_DIR)/tests/test_vector
+		$(BUILD_DIR)/tests/test_cookie_scan \
+		$(BUILD_DIR)/tests/test_verify_errors $(BUILD_DIR)/tests/test_vector
 	$(BUILD_DIR)/tests/test_parse
 	$(BUILD_DIR)/tests/test_crypto
 	$(BUILD_DIR)/tests/test_challenge
 	$(BUILD_DIR)/tests/test_cookie
 	$(BUILD_DIR)/tests/test_cookie_scan
+	$(BUILD_DIR)/tests/test_verify_errors
 	$(BUILD_DIR)/tests/test_vector
 
 $(BUILD_DIR)/fuzz/fuzz_auth_cookie: tests/fuzz/fuzz_auth_cookie.c \

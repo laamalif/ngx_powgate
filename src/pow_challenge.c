@@ -204,7 +204,7 @@ pow_challenge_serialize(uint8_t difficulty, uint64_t bucket,
 }
 
 
-int
+pow_verify_result_t
 pow_proof_check(const uint8_t nonce[POW_NONCE_LEN],
     const uint8_t *counter_ascii, size_t counter_len, uint8_t difficulty)
 {
@@ -217,7 +217,7 @@ pow_proof_check(const uint8_t nonce[POW_NONCE_LEN],
         || difficulty < POW_DIFFICULTY_MIN
         || difficulty > POW_DIFFICULTY_MAX)
     {
-        return 0;
+        return POW_VERIFY_ERROR;
     }
 
     for (i = 0; i < POW_NONCE_LEN; i++) {
@@ -229,10 +229,11 @@ pow_proof_check(const uint8_t nonce[POW_NONCE_LEN],
     }
 
     if (pow_sha256(message, POW_NONCE_LEN + counter_len, digest) == 0) {
-        return 0;
+        return POW_VERIFY_ERROR;
     }
 
-    return pow_leading_zero_bits(digest) >= difficulty ? 1 : 0;
+    return pow_leading_zero_bits(digest) >= difficulty
+           ? POW_VERIFY_VALID : POW_VERIFY_INVALID;
 }
 
 

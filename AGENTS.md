@@ -158,8 +158,9 @@ the same commit that introduces any new rule.
    from `r->pool`; config-time allocations from `cf->pool`. Check every
    allocation for NULL.
 4. **Parsers are pure functions.** `pow_parse.c`, `pow_cookie_scan.c`,
-   `pow_cookie.c`, `pow_challenge.c`, and `pow_crypto.c` include no NGINX
-   headers. Their public APIs use C99 `stdint.h`/`stddef.h` types,
+   `pow_cookie.c`, `pow_challenge.c`, `pow_crypto.c`, and `pow_verify.h`
+   include no NGINX headers. Their public APIs use C99
+   `stdint.h`/`stddef.h` types,
    caller-provided fixed buffers, and zero allocation — signature style:
    `int pow_cookie_parse(const uint8_t *buf, size_t len, pow_cookie_t *out)`.
    This is what keeps the fuzz harnesses at 20 lines.
@@ -176,25 +177,29 @@ the same commit that introduces any new rule.
    ephemeral self-signed TLS certificate generation in test infrastructure;
    those random bytes must never enter a PowGate secret, nonce, challenge,
    cookie, or production path.
-8. **Access handler returns `NGX_DECLINED` for allowed requests**, never
+8. **Verification distinguishes invalid artifacts from internal errors.**
+   Only `pow_cookie_verify()` and `pow_proof_check()` use
+   `pow_verify_result_t`. Any cryptographic-provider or invariant failure is
+   `POW_VERIFY_ERROR`, never `POW_VERIFY_INVALID`.
+9. **Access handler returns `NGX_DECLINED` for allowed requests**, never
    `NGX_OK` (composes with `satisfy`/`allow`/`deny`). Challenge responses
    finalize the request and return `NGX_DONE`.
-9. **Skip subrequests and internal redirects**: bail out immediately when
+10. **Skip subrequests and internal redirects**: bail out immediately when
    `r != r->main || r->internal`.
-10. **Never log attacker-controlled bytes verbatim.** Log lengths and
+11. **Never log attacker-controlled bytes verbatim.** Log lengths and
     verdicts. Never log the secret, a MAC, or a full cookie value at any
     level.
-11. **Out of scope, permanently** — do not implement even if asked by a
+12. **Out of scope, permanently** — do not implement even if asked by a
     TODO or an old comment: CAPTCHA, fingerprinting of any kind, TLS/JA3,
     ML scoring, reputation feeds, external API calls, crawler allowlists,
     JS obfuscation, challenge/session storage.
-12. **Beginning with Phase 3, request integration is HTTPS-only.** Every
+13. **Beginning with Phase 3, request integration is HTTPS-only.** Every
     implemented request-behavior scenario runs over both explicitly asserted
     HTTP/1.1 and HTTP/2. Tests generate an isolated self-signed
     certificate/key inside the runtime prefix and may disable certificate
     verification only in test clients. Never add a production TLS bypass or
     machine-wide test CA.
-13. **Build responses transactionally.** Derive and validate values, allocate
+14. **Build responses transactionally.** Derive and validate values, allocate
     every buffer and header slot, initialize reserved headers with `hash = 0`,
     and commit headers only when the response is complete. A request has
     exactly one terminal outcome: `NGX_DECLINED`, an explicitly finalized
@@ -219,8 +224,8 @@ the same commit that introduces any new rule.
   add `-Wconversion` there (nginx headers don't compile under it) and
   never weaken `-Werror`. Hardening flags go through `--with-cc-opt` only.
   The **pure core is held to a stricter bar**: `pow_parse.c`, `pow_crypto.c`,
-  `pow_cookie_scan.c`, `pow_cookie.c`, and `pow_challenge.c` include no nginx
-  headers, so the unit/fuzz builds compile them with
+  `pow_cookie_scan.c`, `pow_cookie.c`, `pow_challenge.c`, and `pow_verify.h`
+  include no nginx headers, so the unit/fuzz builds compile them with
   `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror` — warning-free
   under the full set, no exceptions.
 - Naming: module-side identifiers are fully prefixed
@@ -272,9 +277,9 @@ the same commit that introduces any new rule.
 - If either `Set-Cookie` allocation after a valid proof fails, return
   `NGX_HTTP_INTERNAL_SERVER_ERROR`; never pass the request through cookieless.
 - The `pow_parse`, `pow_crypto`, `pow_cookie_scan`, `pow_cookie`, and
-  `pow_challenge` source and header families are NGINX-free: C99
-  `stdint.h`/`stddef.h` types only, zero allocation, caller-provided fixed
-  structs.
+  `pow_challenge` source and header families, plus `pow_verify.h`, are
+  NGINX-free: C99 `stdint.h`/`stddef.h` types only, zero allocation,
+  caller-provided fixed structs.
 - New parser behavior = new table rows + new fuzz corpus seeds in the
   same commit.
 
