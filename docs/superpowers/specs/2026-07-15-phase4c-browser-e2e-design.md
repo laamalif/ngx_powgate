@@ -23,9 +23,9 @@ format or server verification rule.
 
 ### Core invariants
 
-- NGINX executes the exact production solver bytes generated from
-  `html/challenge.html`. There is no copied, reconstructed, mocked, or second
-  solver.
+- Chromium executes the exact production solver bytes generated from
+  `html/challenge.html` and served by NGINX. There is no copied,
+  reconstructed, mocked, or second solver.
 - NGINX 1.30.3, Chromium, Puppeteer Core, Ajv, Node.js, the Debian snapshot,
   and every golden-image input are pinned.
 - Browser targets run inside the canonical rootless Podman image with the
@@ -151,6 +151,11 @@ Every browser target verifies:
 - package, command-line, and CDP Chromium versions agree;
 - the tested Git source and worktree state satisfy the target;
 - the embedded image lock equals the repository lock.
+
+The zero-`CapEff` requirement is a locked property of this exact tested
+rootless `--userns=keep-id` invocation. It is not a general claim that every
+secure rootless-container layout must display a zero namespace-scoped
+capability mask.
 
 The host rejects rootful execution, privileged mode, added capabilities,
 unconfined or weakened seccomp, and emulation. Requested and actual Chromium
@@ -341,13 +346,15 @@ creation/inspection/deletion, and clean shutdown. A fixed hashed inline script
 executes; an injected unauthorized script does not, and its expected CSP
 violation is observed.
 
-Sandbox acceptance requires successful operation without prohibited flags,
-separate browser and renderer identities, non-root execution, active seccomp
-in the controller and at least one renderer, zero controller capabilities,
-and no weakened container policy. `/proc` identity fields including
-`NoNewPrivs`, `Seccomp`, `CapEff`, `Uid`, and `Gid` are recorded when
-available. Optional Chromium process types are validated when observed but
-are not universally required.
+The sandbox verdict means that all approved observable acceptance properties
+passed; it does not claim to verify every internal Chromium sandbox layer.
+Those properties are successful operation without prohibited flags, separate
+browser and renderer identities, non-root execution, active seccomp in the
+controller and at least one renderer, zero controller capabilities under the
+canonical invocation, and no weakened container policy. `/proc` identity
+fields including `NoNewPrivs`, `Seccomp`, `CapEff`, `Uid`, and `Gid` are
+recorded when available. Optional Chromium process types are validated when
+observed but are not universally required.
 
 Disposable pages exercise controlled console, page-error, request-failure,
 renderer-loss, and disconnect observation. Each probe has its own event
@@ -393,10 +400,33 @@ does not create another proof-search episode. CDP proves the expected protocol
 on both document responses. There is no redirect, third navigation, loop, or
 challenge backend reach.
 
-For encoded/repeated paths, the test records both browser-visible
-`location.pathname + location.search` and the outgoing raw request target.
-Both preserve the intended encoded/query form. It does not equate NGINX's
-normalized `r->uri` with that raw target.
+Exactly one controller start occurs for the challenge document. The bounded
+calls cover one contiguous counter sequence, exactly one successful proof
+cookie write occurs, and no second controller search begins before or after
+reload. Phase 4B's exact-script controller trace proves call-by-call counter
+continuity; Phase 4C proves the native one-start, one-write, one-reload outcome
+without wrapping the positive production namespace.
+
+For encoded/repeated paths, the two authoritative observations are:
+
+- browser-visible `location.pathname + location.search`; and
+- the server-received request target, captured transiently from NGINX's
+  original `$request_uri` or request-line representation.
+
+CDP proves navigation identity and protocol, but its serialized URL is never
+called the raw request target. The isolated NGINX capture contains only a case
+identifier and a safely encoded target, is deleted after comparison, and
+retains only equality verdicts. Both observations preserve the intended
+encoded/query form. The test does not equate normalized `r->uri` with the
+server-received target.
+
+The capture uses a fixture-only `escape=json` access-log format with a fixed
+safe case header, `$request_uri`, and `$http_cookie`; it is not a retained
+diagnostic log. Pinned NGINX 1.30.3 reconstructs HTTP/2 Cookie fragments into
+one field with `"; "` separators before request handling, and the H1 case must
+observe one Chromium Cookie field. If that one-effective-field precondition
+cannot be established, the case fails instead of normalizing multiple fields
+through `$http_cookie`'s generic comma-join behavior.
 
 ### Challenge assertions
 
@@ -414,6 +444,16 @@ networking rather than misclassifying browser-service traffic as page traffic.
 ### Browser-native cookie outcome
 
 The reload request carries exactly one exact-name canonical v1 `__pow_p`.
+The authoritative occurrence count comes from the Cookie field bytes in
+NGINX's request representation, captured only in the isolated transient
+fixture and processed by a narrow test utility linked to the existing
+NGINX-free production cookie scanner. The utility consumes length-delimited
+field bytes through standard input and emits only counts and fixed verdicts.
+It never uses `split(";")`, a browser-cookie API approximation, or a second
+cookie grammar. The raw field capture is deleted and never enters retained
+diagnostics. Pinned NGINX HTTP/2 reconstruction ordering remains part of the
+tested request representation.
+
 After the final 200, browser and response metadata prove exactly one configured
 auth cookie exists with `Path=/`, Secure, HttpOnly, SameSite=Lax, host-only
 scope, no Domain attribute, and exact v1 value shape. Every exact-name proof
@@ -485,9 +525,16 @@ It does not benchmark the private controller or add another solver.
 A minimal static HTTPS NGINX page contains the exact generated production
 script and CSP hash but no PowGate module. The parameter JSON is exactly `{}`,
 which reaches the controller-tested static terminal state before cleanup,
-backend selection, or mining. The harness first proves zero solve, cookie,
-reload, recurring timer, animation, and console activity, then calls the
-unchanged public `solve(nonce, difficulty, startCounter, maxAttempts, backend)`.
+backend selection, or mining. The harness waits for terminal UI, then observes
+one fixed `BENCHMARK_CONTROLLER_QUIET_WINDOW_MS` with zero solve, cookie
+mutation, navigation, animation-frame-driven DOM mutation, recurring
+observable event, or console activity before calling the unchanged public
+`solve(nonce, difficulty, startCounter, maxAttempts, backend)`.
+
+The canonical benchmark does not replace or wrap `setTimeout`, `setInterval`,
+`requestAnimationFrame`, Promise scheduling, or another browser scheduling
+primitive. Timer-registration instrumentation belongs only in separate
+controller contract tests.
 
 It verifies script/CSP identity, the frozen two-export namespace, and both
 production-shaped backend KATs. No wrapper, provider interception, test branch,
@@ -571,7 +618,7 @@ build/benchmark-browser-result.json
 docs/benchmarks/phase4c-v1/
   schema.json
   README.md
-  x86_64-debian-chromium-150.0.7871.100-1-deb13u1.json
+  x86_64-debian-chromium-150.0.7871.100-1%7Edeb13u1.json
 ```
 
 The schema is Draft 2020-12 with strict object boundaries and fixed
@@ -637,6 +684,16 @@ tracked source since measurement, matching hashes/locks, full validation, and
 a non-existing derived canonical filename. The copy is the final operation.
 Evidence retains the tested source commit and `evidence_commit: null`; Git
 history records the later evidence-only commit.
+
+The canonical filename is derived by one checked-in function shared by
+promotion and validation. Architecture and package name use their locked
+ASCII identifiers in
+`<architecture>-debian-<package>-<encoded-version>.json`. Every
+package-version UTF-8 byte outside
+`[A-Za-z0-9._-]` is percent-encoded with uppercase hexadecimal; existing `%`
+is therefore encoded as `%25`. This injective rule maps `~` to `%7E` and
+prevents two Debian versions from colliding after sanitization. The README and
+promotion tool use only this derivation.
 
 The evidence README names the tested source, canonical environment,
 reproduction command, mechanical decision rule, selected fixed order, and the
@@ -712,6 +769,7 @@ responsiveness, cleanup, and evidence are never retried into success.
 | `E2E_TERMINAL_OUTCOME_TIMEOUT_MS` | 30,000 |
 | `CONTROLLED_PROBE_TIMEOUT_MS` | 10,000 |
 | `FAIL_CLOSED_QUIET_WINDOW_MS` | 1,000 |
+| `BENCHMARK_CONTROLLER_QUIET_WINDOW_MS` | 1,000 |
 | `DIAGNOSTIC_CAPTURE_TIMEOUT_MS` | 10,000 |
 | `PAGE_CONTEXT_CLOSE_TIMEOUT_MS` | 10,000 |
 | `CHROMIUM_CLOSE_TIMEOUT_MS` | 15,000 |
@@ -728,10 +786,13 @@ Outer watchdogs are deadlock safeguards outside Node where possible:
 | `BENCHMARK_TARGET_TIMEOUT_MS` | 360,000 |
 | `BROWSER_AGGREGATE_TIMEOUT_MS` | 1,300,000 |
 
-Policy verifies the aggregate exceeds its children by 160,000 ms. An outer
-timeout is `internal_invariant` unless a specific failure was durably recorded.
-It sends TERM to the verified test process, allows a fixed 20-second cleanup
-grace, then terminates only verified owned processes.
+Each listed target watchdog is a total budget that already includes its final
+20-second emergency cleanup grace. At `target_budget - cleanup_grace`, the
+outer watchdog sends TERM to the verified test process; it performs final
+termination only when the listed total budget expires. Policy verifies that
+the aggregate exceeds the three complete child budgets by 160,000 ms, so no
+additional hidden child grace is omitted. An outer timeout is
+`internal_invariant` unless a specific failure was durably recorded.
 
 ```text
 OUTER_WATCHDOG_CLEANUP_GRACE_MS = 20000
@@ -750,6 +811,7 @@ MAX_OBSERVATION_METADATA_BYTES_PER_PAGE = 1 MiB
 MAX_RAW_SAMPLES_PER_RUN_SERIES = 8192
 MAX_GENERATED_EVIDENCE_BYTES = 16 MiB
 MAX_RETAINED_DIAGNOSTIC_BYTES = 2 MiB
+MAX_FAILED_BENCHMARK_SAMPLE_EXCERPT = 32
 ```
 
 Heartbeat accounting records a delay for every elapsed 5 ms scheduled
@@ -764,8 +826,10 @@ minimum_expected_samples =
 ```
 
 Failed benchmarks leave no `build/benchmark-browser-result.json`. A bounded
-diagnostic may retain aggregate verdicts and a limited allowlisted sample
-excerpt, but never full raw arrays under the canonical schema/name.
+diagnostic may retain only the failing run/backend, summary p95/maximum/block
+verdicts, and at most `MAX_FAILED_BENCHMARK_SAMPLE_EXCERPT` allowlisted timing
+samples per relevant series. It never retains a schema-valid partial evidence
+object or full raw arrays under the canonical schema/name.
 
 ## 12. Final gates and completion criteria
 
@@ -796,14 +860,29 @@ exclusion covers PowGate, the entire NGINX binary, a broad HTTP/2 pattern, or
 an unknown finding. The negative-control alignment test must still detect an
 equivalent project-code fault.
 
-Every sanitized protocol run proves the expected instrumented binary and
-runtime configuration, log ownership by verified master/worker identities,
-all worker-generation exits, complete expected log collection, and absence of
-ASan/UBSan report, deadly signal, allocator/runtime initialization error, or
-abnormal exit. Server-only sanitizer runtime options enable a fixture-owned
-per-process startup/exit marker or equivalently unambiguous runtime-activation
-record; the expected set is derived from verified master and worker process
-identities. A missing marker/log is a distinct failure, not a clean result.
+Sanitized execution proves three separate properties:
+
+1. **Build identity.** Hashes and build metadata identify the separately
+   instrumented NGINX binary and PowGate module, symbol/runtime inspection
+   proves sanitizer instrumentation and linkage, and both artifacts differ
+   from their normal-build counterparts.
+2. **Runtime identity.** The fixture records the exact sanitized master path
+   and hash, verifies every worker is a descendant in that instrumented server
+   generation, records every worker generation and verifies every generation
+   exits, applies sanitizer environment only to NGINX, and proves that Chromium
+   and its harness environment are scrubbed of sanitizer preload, option, and
+   runtime-path variables.
+3. **Result.** The harness collects every sanitizer report that exists and
+   fails on any ASan/UBSan diagnostic, sanitizer initialization failure,
+   deadly signal, allocator failure, abnormal exit, or unexpected sanitizer
+   stderr signature. A clean process is not required to create an empty report
+   file or clean-exit marker.
+
+A separate test-only sanitizer negative control deliberately triggers the
+reviewed project-code alignment fault and must produce a captured report under
+the same report-collection and suppression policy. It introduces no
+production directive, request path, source branch, or release artifact. This
+proves instrumentation and report collection without adding clean-run hooks.
 Sanitizer diagnostics follow the normal redaction budget.
 
 Feasibility and benchmarking do not load PowGate and are not duplicated under
