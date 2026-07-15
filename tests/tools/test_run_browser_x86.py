@@ -15,6 +15,7 @@ LABEL = "org.ngx-powgate.golden-image-lock"
 APPROVED = (
     "test-browser-feasibility",
     "test-browser-e2e",
+    "test-browser-partitioned-feasibility",
     "benchmark-browser",
     "check-browser-x86",
 )
@@ -198,8 +199,10 @@ class RequireBrowserX86Test(unittest.TestCase):
         )
 
     def test_accepts_the_canonical_container_identity(self):
-        result = self.run_guard()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        for target in APPROVED:
+            with self.subTest(target=target):
+                result = self.run_guard(target)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_non_x86_diagnostic_names_the_public_target(self):
         with tempfile.TemporaryDirectory() as temporary:

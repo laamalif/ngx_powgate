@@ -4,7 +4,7 @@ set -eu
 
 case "${1-}" in
     test-browser-feasibility | test-browser-e2e | benchmark-browser \
-        | check-browser-x86)
+        | check-browser-x86 | test-browser-partitioned-feasibility)
         target=$1
         ;;
     *)
