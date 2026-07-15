@@ -45,6 +45,39 @@ violation() {
     fail=1
 }
 
+# Runtime sanitizer suppressions are an exact reviewed allowlist.  This keeps
+# pinned upstream exceptions narrow and prevents a wildcard or PowGate-local
+# suppression from silently weakening the sanitizer gate.
+allowed_ubsan_suppressions='alignment:ngx_http_v2_create_headers_frame
+alignment:ngx_http_v2_filter_get_data_frame
+alignment:ngx_http_v2_get_frame
+alignment:ngx_http_v2_handle_continuation
+alignment:ngx_http_v2_send_goaway
+alignment:ngx_http_v2_send_rst_stream
+alignment:ngx_http_v2_send_settings
+alignment:ngx_http_v2_send_window_update
+alignment:ngx_http_v2_state_goaway
+alignment:ngx_http_v2_state_head
+alignment:ngx_http_v2_state_headers
+alignment:ngx_http_v2_state_priority
+alignment:ngx_http_v2_state_rst_stream
+alignment:ngx_http_v2_state_settings_params
+alignment:ngx_http_v2_state_window_update
+function:ngx_output_chain
+nonnull-attribute:ngx_pstrdup
+nonnull-attribute:ngx_sprintf_str'
+
+actual_ubsan_suppressions=$(sed \
+    -e '/^[[:space:]]*#/d' \
+    -e '/^[[:space:]]*$/d' \
+    tools/ubsan-nginx.supp \
+    | LC_ALL=C sort)
+
+if [ "$actual_ubsan_suppressions" != "$allowed_ubsan_suppressions" ]; then
+    violation "unreviewed UBSan suppression" \
+        "$actual_ubsan_suppressions"
+fi
+
 # 1. banned libc string/format functions on request data (hard rules 1+2);
 #    the ngx_-prefixed wrappers are the sanctioned forms and do not match
 #    because the preceding character class excludes '_'
