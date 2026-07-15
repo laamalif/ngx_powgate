@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { positiveCases } from './e2e.mjs';
+import {
+    buildNormalMatrixResult,
+    partitionedNegativeCase,
+    positiveCases,
+} from './e2e.mjs';
 
 
 test('positive browser matrix freezes exact URL and request-target bytes', () => {
@@ -64,4 +68,36 @@ test('positive browser matrix freezes exact URL and request-target bytes', () =>
             true,
         );
     }
+});
+
+
+test('partitioned negative case freezes the challenge-phase target', () => {
+    const testCase = partitionedNegativeCase();
+
+    assert.equal(Object.isFrozen(testCase), true);
+    assert.deepEqual({
+        id: testCase.id,
+        requestTargetHex: testCase.expectedRequestTarget.toString('hex'),
+        target: testCase.target,
+    }, {
+        id: 'partitioned-fail-closed',
+        requestTargetHex: Buffer.from(
+            '/partitioned-feasibility', 'ascii',
+        ).toString('hex'),
+        target: '/partitioned-feasibility',
+    });
+});
+
+
+test('normal matrix result requires eight positive and two negative cases', () => {
+    assert.deepEqual(buildNormalMatrixResult(8, 2), {
+        normalPartitionedNegative: 2,
+        normalPositive: 8,
+        normalTotal: 10,
+        verdict: 'passed',
+    });
+    assert.throws(
+        () => buildNormalMatrixResult(8, 1),
+        /incomplete normal browser matrix/,
+    );
 });

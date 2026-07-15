@@ -23,6 +23,37 @@ export const PARTITIONED_PROOF_FIXTURE = Object.freeze({
 });
 
 
+export function countExactProofCookies(text) {
+    if (typeof text !== 'string') {
+        throw new TypeError('invalid cookie text');
+    }
+
+    const proofName = '__pow_p';
+    let count = 0;
+    let cursor = 0;
+
+    while (cursor <= text.length) {
+        let end = text.indexOf(';', cursor);
+        if (end === -1) {
+            end = text.length;
+        }
+        while (cursor < end && (text.charCodeAt(cursor) === 0x20
+            || text.charCodeAt(cursor) === 0x09)) {
+            cursor++;
+        }
+        if (text.slice(cursor, cursor + proofName.length + 1)
+            === `${proofName}=`) {
+            count++;
+        }
+        if (end === text.length) {
+            break;
+        }
+        cursor = end + 1;
+    }
+    return count;
+}
+
+
 export function partitionedCookieMatchesFixture(cookie) {
     const partitionKey = cookie?.partitionKey;
 

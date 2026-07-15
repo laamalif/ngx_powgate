@@ -9,10 +9,13 @@ import { observeRequest } from './request-observation.mjs';
 import { DEADLINES } from './constants.mjs';
 import {
     PARTITIONED_PROOF_FIXTURE,
+    countExactProofCookies,
     partitionedCookieMatchesFixture,
     partitionedObserverBootstrap,
     partitionedObserverSnapshot,
 } from './partitioned-proof.mjs';
+
+export { countExactProofCookies as countExactProofs };
 
 const BOOLEAN_FIELDS = Object.freeze([
     'initial_document_visible',
@@ -89,33 +92,6 @@ export function buildPartitionedVerdict(observations) {
             observations.post_cleanup_storage_present,
         solver_calls: observations.solver_calls,
     });
-}
-
-
-export function countExactProofs(text) {
-    const proofName = '__pow_p';
-    let count = 0;
-    let cursor = 0;
-
-    while (cursor <= text.length) {
-        let end = text.indexOf(';', cursor);
-        if (end === -1) {
-            end = text.length;
-        }
-        while (cursor < end && (text.charCodeAt(cursor) === 0x20
-            || text.charCodeAt(cursor) === 0x09)) {
-            cursor++;
-        }
-        if (text.slice(cursor, cursor + proofName.length + 1)
-            === `${proofName}=`) {
-            count++;
-        }
-        if (end === text.length) {
-            break;
-        }
-        cursor = end + 1;
-    }
-    return count;
 }
 
 
@@ -247,7 +223,7 @@ async function runTrial(fixture, observed) {
         });
         const storedBefore = await partitionedCookies(session, protectedUrl);
         const initialVisible = await session.page.evaluate(
-            `(${countExactProofs.toString()})(document.cookie)`,
+            `(${countExactProofCookies.toString()})(document.cookie)`,
         );
         if (observed) {
             await installObserver(session);
@@ -270,7 +246,7 @@ async function runTrial(fixture, observed) {
         ));
 
         const postVisible = await session.page.evaluate(
-            `(${countExactProofs.toString()})(document.cookie)`,
+            `(${countExactProofCookies.toString()})(document.cookie)`,
         );
         const storedAfter = await partitionedCookies(session, protectedUrl);
         const documents = session.documentResponses.slice(documentStart)
@@ -402,4 +378,3 @@ export async function runPartitionedTrials({
     });
     return trials;
 }
-

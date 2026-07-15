@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import {
     PARTITIONED_PROOF_FIXTURE,
     classifyPartitionedCookies,
+    countExactProofCookies,
     partitionedCookieMatchesFixture,
     partitionedObserverBootstrap,
 } from './lib/partitioned-proof.mjs';
@@ -97,6 +98,18 @@ test('partitioned fixture matcher requires exact structured metadata', () => {
 });
 
 
+test('partitioned proof counting uses exact cookie-pair names', () => {
+    assert.equal(countExactProofCookies(''), 0);
+    assert.equal(countExactProofCookies('__pow_p=1.0.0'), 1);
+    assert.equal(countExactProofCookies(
+        'x=1; __pow_p=1.0.0; __pow_p_old=2; y__pow_p=3',
+    ), 1);
+    assert.equal(countExactProofCookies(
+        '__pow_p=1.0.0;\t__pow_p=1.1.1',
+    ), 2);
+});
+
+
 test('partitioned cookie classification separates every replacement scope', () => {
     assert.deepEqual(classifyPartitionedCookies(
         [fixtureCookie()], [], 'PowAuth',
@@ -122,6 +135,24 @@ test('partitioned cookie classification separates every replacement scope', () =
             'PowAuth'),
         /partitioned proof cookie is not host-only/,
     );
+});
+
+
+test('partitioned classification rejects overwritten and opaque fixtures', () => {
+    assert.deepEqual(classifyPartitionedCookies([
+        fixtureCookie({ value: '1.1.1' }),
+    ], [], 'PowAuth'), {
+        authCookieCount: 0,
+        newPartitionedProofCount: 1,
+        originalPartitionedProofCount: 0,
+        unpartitionedProofCount: 0,
+    });
+    assert.equal(partitionedCookieMatchesFixture(fixtureCookie({
+        partitionKey: { sourceOrigin: 'https://powgate.test' },
+    })), false);
+    assert.equal(partitionedCookieMatchesFixture(fixtureCookie({
+        partitionKey: 'https://powgate.test',
+    })), false);
 });
 
 

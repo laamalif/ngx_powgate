@@ -18,6 +18,14 @@ import {
     observeRequest,
 } from './lib/request-observation.mjs';
 import { DEADLINES } from './lib/constants.mjs';
+import {
+    PARTITIONED_PROOF_FIXTURE,
+    classifyPartitionedCookies,
+    countExactProofCookies,
+    partitionedCookieMatchesFixture,
+    partitionedObserverBootstrap,
+    partitionedObserverSnapshot,
+} from './lib/partitioned-proof.mjs';
 
 const AUTH_COOKIE_NAME = 'PowAuth';
 const PROOF_COOKIE_NAME = '__pow_p';
@@ -80,9 +88,34 @@ const POSITIVE_CASES = Object.freeze([
         '/account',
     ),
 ]);
+const PARTITIONED_NEGATIVE_CASE = Object.freeze({
+    expectedRequestTarget: Buffer.from(
+        PARTITIONED_PROOF_FIXTURE.challengePath, 'ascii',
+    ),
+    id: 'partitioned-fail-closed',
+    target: PARTITIONED_PROOF_FIXTURE.challengePath,
+});
 
 export function positiveCases() {
     return POSITIVE_CASES;
+}
+
+
+export function partitionedNegativeCase() {
+    return PARTITIONED_NEGATIVE_CASE;
+}
+
+
+export function buildNormalMatrixResult(positive, partitionedNegative) {
+    if (positive !== 8 || partitionedNegative !== 2) {
+        throw new Error('incomplete normal browser matrix');
+    }
+    return Object.freeze({
+        normalPartitionedNegative: partitionedNegative,
+        normalPositive: positive,
+        normalTotal: positive + partitionedNegative,
+        verdict: 'passed',
+    });
 }
 
 
@@ -123,6 +156,12 @@ http {
         ssl_certificate_key ${paths.privateKey};
         access_log ${requestLog} powgate_browser;
         location = /__powgate_ready { access_log off; return 204; }
+        location = ${PARTITIONED_PROOF_FIXTURE.seedPath} {
+            access_log off;
+            add_header Set-Cookie "${PARTITIONED_PROOF_FIXTURE.setCookie}";
+            default_type text/html;
+            return 200 '<!doctype html><title>partitioned seed</title>';
+        }
         location = /favicon.ico { access_log off; return 204; }
         location / {
             pow on;
@@ -392,6 +431,40 @@ async function assertRequestObservations(fixture, testCase, beforeCount) {
 }
 
 
+async function countVisibleProofCookies(page) {
+    return page.evaluate(
+        `(${countExactProofCookies.toString()})(document.cookie)`,
+    );
+}
+
+
+async function assertPartitionedRequestObservation(
+    fixture, testCase, beforeCount,
+) {
+    const filename = path.join(
+        fixture.paths.logs, 'request-observation.log',
+    );
+    const lines = (await readLines(filename)).slice(beforeCount)
+        .map(parseObservationLine);
+
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].status, 503);
+    const observation = await observeRequest({
+        requestUri: lines[0].requestUri,
+        expectedRequestUri: testCase.expectedRequestTarget,
+        cookie: lines[0].cookie,
+        effectiveCookieFieldCount: 1,
+        scannerPath: SCANNER_PATH,
+    });
+    assert.deepEqual(observation, {
+        proofOccurrenceCount: 1,
+        requestUriMatches: true,
+        singleEffectiveCookieField: true,
+    });
+    return observation.proofOccurrenceCount;
+}
+
+
 export async function runPositiveCase(fixture, testCase) {
     const expectedProtocol = fixture.protocolMode === 'h2' ? 'h2' : 'http/1.1';
     const requestLog = path.join(fixture.paths.logs, 'request-observation.log');
@@ -545,12 +618,222 @@ export async function runPositiveCase(fixture, testCase) {
 }
 
 
+export async function runPartitionedNegativeCase(fixture, testCase) {
+    const expectedProtocol = fixture.protocolMode === 'h2' ? 'h2' : 'http/1.1';
+    const requestLog = path.join(fixture.paths.logs, 'request-observation.log');
+    const backendLog = path.join(fixture.paths.logs, 'backend-count.log');
+    const backendCountBefore = (await readLines(backendLog)).length;
+    const session = await fixture.createBrowserSession({
+        protocolMode: fixture.protocolMode,
+        observe: { allowChallengeStatusConsole: true },
+    });
+    const bodyCapture = await enableDocumentBodyCapture(session);
+    const protectedUrl = `${fixture.origin}${testCase.target}`;
+    let primaryFailure;
+
+    try {
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_seed`;
+        const seedResponse = await session.page.goto(
+            `${fixture.origin}${PARTITIONED_PROOF_FIXTURE.seedPath}`,
+            {
+                waitUntil: 'load',
+                timeout: DEADLINES.document_navigation,
+            },
+        );
+        assert.equal(seedResponse.status(), 200);
+        assert.equal(
+            await seedResponse.text(),
+            '<!doctype html><title>partitioned seed</title>',
+        );
+        assert.equal(
+            seedResponse.headers()['set-cookie'],
+            PARTITIONED_PROOF_FIXTURE.setCookie,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.equal((await readLines(backendLog)).length - backendCountBefore, 0);
+
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_seed_cookie`;
+        const seededCookies = await session.context.cookies(protectedUrl);
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_seed_classification`;
+        const seededClassification = classifyPartitionedCookies(
+            seededCookies, [], AUTH_COOKIE_NAME,
+        );
+        assert.deepEqual(seededClassification, {
+            authCookieCount: 0,
+            newPartitionedProofCount: 0,
+            originalPartitionedProofCount: 1,
+            unpartitionedProofCount: 0,
+        });
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_seed_descriptor`;
+        assert.equal(
+            seededCookies.filter(partitionedCookieMatchesFixture).length,
+            1,
+        );
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_seed_visibility`;
+        assert.equal(await countVisibleProofCookies(session.page), 1);
+
+        await session.page.evaluateOnNewDocument(
+            partitionedObserverBootstrap,
+        );
+        const requestCountBefore = (await readLines(requestLog)).length;
+        const documentStart = session.documentResponses.length;
+        const auditWindow = session.observations.openWindow(
+            'partitioned_negative_audit',
+        );
+        const requests = [];
+        session.page.on('request', (request) => {
+            requests.push(Object.freeze({
+                navigation: request.isNavigationRequest(),
+                resourceType: request.resourceType(),
+                url: request.url(),
+            }));
+        });
+
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_challenge`;
+        const initialResponse = await session.page.goto(protectedUrl, {
+            waitUntil: 'load',
+            timeout: DEADLINES.document_navigation,
+        });
+        assert.equal(initialResponse.status(), 503);
+        const initialBody = bodyCapture.take(503);
+        await assertChallengeResponse(initialResponse, initialBody);
+        await session.page.waitForFunction(() => {
+            const status = document.getElementById('pow-status');
+            const retry = document.getElementById('pow-retry');
+            return status?.textContent === 'Unable to complete the check.'
+                && retry?.hidden === false;
+        }, { timeout: DEADLINES.e2e_terminal_outcome });
+
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_audit`;
+        assert.deepEqual(auditWindow.snapshot(), [{
+            consoleType: 'error',
+            identifier: 'challenge_status',
+            type: 'console',
+        }]);
+        auditWindow.close();
+        const quietWindow = session.observations.openWindow(
+            'partitioned_negative_quiet',
+        );
+        const requestCountAtQuietStart = requests.length;
+        const cookieCountAtQuietStart = await countVisibleProofCookies(
+            session.page,
+        );
+        await new Promise((resolve) => setTimeout(
+            resolve, DEADLINES.fail_closed_quiet_window,
+        ));
+        assert.deepEqual(quietWindow.snapshot(), []);
+        quietWindow.close();
+        assert.equal(requests.length, requestCountAtQuietStart);
+        assert.equal(await countVisibleProofCookies(session.page),
+            cookieCountAtQuietStart);
+        assert.equal(
+            await session.page.evaluate(() => location.pathname + location.search),
+            testCase.target,
+        );
+
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_sequence`;
+        const documents = session.documentResponses.slice(documentStart);
+        assert.deepEqual(documents.map((record) => ({
+            protocol: record.protocol,
+            status: record.status,
+            url: record.url,
+        })), [{
+            protocol: expectedProtocol,
+            status: 503,
+            url: protectedUrl,
+        }]);
+        assert.deepEqual(requests.map((request) => ({
+            navigation: request.navigation,
+            resourceType: request.resourceType,
+            url: request.url,
+        })), [{
+            navigation: true,
+            resourceType: 'document',
+            url: protectedUrl,
+        }]);
+
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_request_log`;
+        const initialRequestProofCount =
+            await assertPartitionedRequestObservation(
+                fixture, testCase, requestCountBefore,
+            );
+
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_observer`;
+        const observer = await partitionedObserverSnapshot(session.page);
+        assert.deepEqual(observer, {
+            descriptorValid: true,
+            exportsValid: true,
+            namespaceAssignments: 1,
+            namespaceFrozen: true,
+            phase: 'installed',
+            solverCalls: 0,
+        });
+
+        currentOperation = `${fixture.protocolMode}_${testCase.id}_cookies`;
+        const finalCookies = await session.context.cookies(protectedUrl);
+        const finalClassification = classifyPartitionedCookies(
+            finalCookies, [], AUTH_COOKIE_NAME,
+        );
+        assert.deepEqual(finalClassification, {
+            authCookieCount: 0,
+            newPartitionedProofCount: 0,
+            originalPartitionedProofCount: 1,
+            unpartitionedProofCount: 0,
+        });
+        assert.equal(
+            finalCookies.filter(partitionedCookieMatchesFixture).length,
+            1,
+        );
+        assert.equal(await countVisibleProofCookies(session.page), 1);
+        assert.equal((await readLines(backendLog)).length - backendCountBefore, 0);
+        session.assertHealthy();
+
+        return Object.freeze({
+            authCookieCount: finalClassification.authCookieCount,
+            backendCount: 0,
+            challengePhaseDocumentNavigationCount: documents.length,
+            failureUiVisible: true,
+            initialDocumentVisible: true,
+            initialRequestProofCount,
+            namespaceAssignments: observer.namespaceAssignments,
+            newPartitionedProofCount:
+                finalClassification.newPartitionedProofCount,
+            originalPartitionedProofCount:
+                finalClassification.originalPartitionedProofCount,
+            partitionedCookieStored: true,
+            postCleanupDocumentVisible: true,
+            postCleanupStoragePresent: true,
+            protocol: expectedProtocol,
+            retryControlVisible: true,
+            solverCalls: observer.solverCalls,
+            unpartitionedProofCount:
+                finalClassification.unpartitionedProofCount,
+        });
+    } catch (error) {
+        primaryFailure = error;
+        throw error;
+    } finally {
+        try {
+            await bodyCapture.close();
+            await session.close();
+        } catch (cleanupError) {
+            if (primaryFailure === undefined) {
+                throw cleanupError;
+            }
+            primaryFailure.cleanupFailures ??= [];
+            primaryFailure.cleanupFailures.push(cleanupError);
+        }
+    }
+}
+
+
 export async function runE2EMatrix({ serverBuild = 'normal' } = {}) {
     if (serverBuild !== 'normal') {
         throw new TypeError('unsupported server build');
     }
 
-    let passed = 0;
+    let partitionedNegativePassed = 0;
+    let positivePassed = 0;
 
     for (const protocolMode of ['h2', 'h1']) {
         currentOperation = `${protocolMode}_fixture_start`;
@@ -564,12 +847,18 @@ export async function runE2EMatrix({ serverBuild = 'normal' } = {}) {
             const matrixFixture = Object.freeze({ ...fixture, protocolMode });
             for (const testCase of positiveCases()) {
                 await runPositiveCase(matrixFixture, testCase);
-                passed++;
+                positivePassed++;
             }
+            await runPartitionedNegativeCase(
+                matrixFixture, partitionedNegativeCase(),
+            );
+            partitionedNegativePassed++;
         });
     }
 
-    return Object.freeze({ normalCases: passed, verdict: 'passed' });
+    return buildNormalMatrixResult(
+        positivePassed, partitionedNegativePassed,
+    );
 }
 
 
@@ -581,7 +870,9 @@ async function main() {
     }
     const result = await runE2EMatrix({ serverBuild: arguments_[1] });
     process.stdout.write(
-        `normal_cases=${result.normalCases} verdict=${result.verdict}\n`,
+        `normal_positive=${result.normalPositive} `
+        + `normal_partitioned_negative=${result.normalPartitionedNegative} `
+        + `normal_total=${result.normalTotal} verdict=${result.verdict}\n`,
     );
 }
 
