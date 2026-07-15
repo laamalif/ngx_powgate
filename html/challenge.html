@@ -8,10 +8,18 @@
 :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
 body { display: grid; min-height: 100vh; margin: 0; place-items: center; }
 main { max-width: 32rem; padding: 2rem; text-align: center; }
+progress { width: 100%; }
+button { margin-top: 1rem; }
 </style>
 </head>
 <body>
-<main><h1>Checking your connection</h1><p>Please wait.</p></main>
+<main>
+<h1>Checking your connection</h1>
+<p id="pow-status" aria-live="polite">Please wait.</p>
+<progress id="pow-progress" max="1" value="0"></progress>
+<button id="pow-retry" type="button" hidden>Retry</button>
+</main>
+<noscript>JavaScript is required to continue.</noscript>
 <!-- POW:PARAMS -->
 <script>(() => {
 'use strict';
@@ -252,6 +260,231 @@ async function solve(nonce, difficulty, startCounter, maxAttempts, backend) {
 }
 
 globalThis.PowGateSolver = Object.freeze({ sha256, solve });
+
+const proofName = '__pow_p';
+const alphabet =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const katNonceHex =
+  'c382cd45c32e81f6f5bdcc5fb29497876a3d4364b688245668ab1b578ff7184f';
+const katDigestHex =
+  '0028df459a18ed1973ccbfb54439b98bef2e3988fb5072e2fd3b8a1368d275f5';
+let controllerState = 'initializing';
+let statusNode = null;
+let progressNode = null;
+let retryNode = null;
+
+function hexBytes(text) {
+  const bytes = new Uint8Array(text.length / 2);
+
+  for (let index = 0; index < bytes.length; index++) {
+    bytes[index] = Number.parseInt(text.slice(index * 2, index * 2 + 2), 16);
+  }
+
+  return bytes;
+}
+
+function bytesEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function decodeNonce(text) {
+  if (typeof text !== 'string' || text.length !== 43) {
+    throw new TypeError('nonce');
+  }
+
+  const values = new Uint8Array(43);
+  for (let index = 0; index < text.length; index++) {
+    values[index] = alphabet.indexOf(text[index]);
+    if (values[index] === 255) {
+      throw new TypeError('nonce');
+    }
+  }
+  if ((values[42] & 3) !== 0) {
+    throw new TypeError('nonce');
+  }
+
+  const output = new Uint8Array(32);
+  let out = 0;
+  for (let index = 0; index < 40; index += 4) {
+    output[out++] = (values[index] << 2) | (values[index + 1] >>> 4);
+    output[out++] = (values[index + 1] << 4) | (values[index + 2] >>> 2);
+    output[out++] = (values[index + 2] << 6) | values[index + 3];
+  }
+  output[out++] = (values[40] << 2) | (values[41] >>> 4);
+  output[out] = (values[41] << 4) | (values[42] >>> 2);
+  return output;
+}
+
+function parseParams() {
+  const node = document.getElementById('pow-params');
+  if (node == null) {
+    throw new TypeError('params');
+  }
+
+  const value = JSON.parse(node.textContent);
+  if (value == null || Array.isArray(value)
+    || Object.keys(value).sort().join(',') !== 'b,d,n,v'
+    || value.v !== 1
+    || !Number.isInteger(value.d) || value.d < 1 || value.d > 32
+    || typeof value.b !== 'string'
+    || !/^(0|[1-9][0-9]{0,19})$/.test(value.b)
+    || (value.b.length === 20 && value.b > '18446744073709551615')) {
+    throw new TypeError('params');
+  }
+
+  return Object.freeze({
+    v: value.v,
+    d: value.d,
+    b: value.b,
+    nonce: decodeNonce(value.n)
+  });
+}
+
+function proofValues(text) {
+  const values = [];
+  let cursor = 0;
+
+  while (cursor <= text.length) {
+    let end = text.indexOf(';', cursor);
+    if (end === -1) {
+      end = text.length;
+    }
+    while (cursor < end
+      && (text.charCodeAt(cursor) === 0x20
+        || text.charCodeAt(cursor) === 0x09)) {
+      cursor++;
+    }
+    const prefix = `${proofName}=`;
+    if (text.slice(cursor, cursor + prefix.length) === prefix) {
+      values.push(text.slice(cursor + prefix.length, end));
+    }
+    if (end === text.length) {
+      break;
+    }
+    cursor = end + 1;
+  }
+
+  return values;
+}
+
+function pathCandidates(pathname) {
+  if (typeof pathname !== 'string' || !pathname.startsWith('/')) {
+    throw new TypeError('path');
+  }
+  for (let index = 0; index < pathname.length; index++) {
+    const code = pathname.charCodeAt(index);
+    if (code <= 0x20 || code === 0x7f || code === 0x3b) {
+      throw new TypeError('path');
+    }
+  }
+
+  const paths = new Set(['/']);
+  for (let index = 1; index < pathname.length; index++) {
+    if (pathname[index] === '/') {
+      paths.add(pathname.slice(0, index));
+      paths.add(pathname.slice(0, index + 1));
+    }
+  }
+  paths.add(pathname);
+  return paths;
+}
+
+function clearProofCookies() {
+  const protocol = location.protocol;
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new TypeError('scheme');
+  }
+  const secure = protocol === 'https:' ? '; Secure' : '';
+  for (const path of pathCandidates(location.pathname)) {
+    document.cookie = `${proofName}=; Max-Age=0; Path=${path}; `
+      + `SameSite=Lax${secure}`;
+  }
+  if (proofValues(document.cookie).length !== 0) {
+    throw new Error('cookie cleanup');
+  }
+}
+
+async function backendKat(backend, api) {
+  const message = proofMessage(hexBytes(katNonceHex), 34);
+  let digest;
+
+  if (backend === 'js') {
+    digest = api.sha256(message);
+  } else {
+    const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
+    if (subtle == null || typeof subtle.digest !== 'function') {
+      throw new Error('digest unavailable');
+    }
+    digest = new Uint8Array(await subtle.digest('SHA-256', message));
+  }
+
+  if (!bytesEqual(digest, hexBytes(katDigestHex))
+    || !meetsDifficulty(digest, 8)) {
+    throw new Error('self-test');
+  }
+}
+
+async function selectBackend(api) {
+  try {
+    await backendKat('js', api);
+    return 'js';
+  } catch (_error) {
+    await backendKat('subtle', api);
+    return 'subtle';
+  }
+}
+
+function failController() {
+  if (controllerState === 'reloading') {
+    return;
+  }
+  controllerState = 'failure';
+  if (statusNode != null) {
+    statusNode.textContent = 'Unable to complete the check.';
+  }
+  if (progressNode != null) {
+    progressNode.hidden = true;
+  }
+  if (retryNode != null) {
+    retryNode.hidden = false;
+  }
+}
+
+async function startController() {
+  try {
+    statusNode = document.getElementById('pow-status');
+    progressNode = document.getElementById('pow-progress');
+    retryNode = document.getElementById('pow-retry');
+    if (statusNode == null || progressNode == null || retryNode == null) {
+      throw new Error('page');
+    }
+
+    retryNode.addEventListener('click', () => {
+      if (controllerState === 'failure') {
+        controllerState = 'reloading';
+        location.reload();
+      }
+    });
+
+    parseParams();
+    clearProofCookies();
+    await selectBackend(globalThis.PowGateSolver);
+    controllerState = 'mining';
+    statusNode.textContent = 'Checking your browser.';
+  } catch (_error) {
+    failController();
+  }
+}
+
+setTimeout(startController, 0);
 })();
 </script>
 </body>

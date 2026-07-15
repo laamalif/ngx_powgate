@@ -236,7 +236,7 @@ test-integration: check-test-env module fault-modules
 	prove -Itests/integration/lib -v tests/integration/*.t
 
 test-js:
-	node --test tests/e2e/solver.test.mjs
+	node --test tests/e2e/solver.test.mjs tests/e2e/controller.test.mjs
 
 test-e2e: check-test-env module test-js
 	node tests/e2e/smoke.mjs
