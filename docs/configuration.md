@@ -185,6 +185,13 @@ reloads. It performs no network requests and uses no storage, workers,
 tracking, or external resources. Phase 4C remains responsible for validation
 inside a real browser engine.
 
+Before mining, the solver performs candidate-bounded proof-cookie cleanup. It
+always clears `Path=/`, clears each safely serializable segment-boundary
+candidate from the browser's unmodified `location.pathname`, skips unsafe
+complete candidates, and then requires no exact `__pow_p` occurrence to
+remain visible. A literal semicolon is unsafe for cookie Path serialization;
+a percent-encoded `%3B` remains visible ASCII and is preserved as observed.
+
 PowGate always emits its own CSP. An operator `add_header` policy intersects
 with it in browsers. On a 503 response, NGINX adds that operator header only
 when the directive uses `always`; PowGate never merges or weakens it.
