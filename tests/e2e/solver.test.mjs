@@ -6,8 +6,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+    buildChallengeArtifacts,
     evaluateChallengeScript,
-    readChallengeScript
+    extractExecutableScript,
+    readChallengeScript,
+    readProtocolConstants
 } from './lib/challenge-script.mjs';
 
 
@@ -87,6 +90,35 @@ test('installs the exact frozen two-function namespace', async () => {
     assert.equal(typeof solver.sha256, 'function');
     assert.equal(typeof solver.solve, 'function');
     assert.equal(Object.isFrozen(solver), true);
+});
+
+
+test('generator hashes the exact executable production bytes', async () => {
+    const script = await readChallengeScript();
+    const artifacts = await buildChallengeArtifacts();
+    const reconstructed = Buffer.concat([
+        artifacts.prefix,
+        artifacts.suffix
+    ]);
+
+    assert.deepEqual(extractExecutableScript(reconstructed), script);
+    assert.equal(artifacts.digest.toString('ascii'),
+        createHash('sha256').update(script).digest('base64'));
+});
+
+
+test('solver boundaries agree with the C protocol constants', async () => {
+    const constants = await readProtocolConstants();
+    const solver = await loadSolver();
+    const nonce = new Uint8Array(32);
+
+    assert.equal(constants.proofCounterMax, Number.MAX_SAFE_INTEGER);
+    await solver.solve(nonce, constants.difficultyMin, 0, 1, 'js');
+    await solver.solve(nonce, constants.difficultyMax, 0, 1, 'js');
+    await assert.rejects(solver.solve(nonce,
+        constants.difficultyMin - 1, 0, 1, 'js'));
+    await assert.rejects(solver.solve(nonce,
+        constants.difficultyMax + 1, 0, 1, 'js'));
 });
 
 

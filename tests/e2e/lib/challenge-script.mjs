@@ -1,14 +1,20 @@
+import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import vm from 'node:vm';
 
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
     '../../..');
 const templatePath = path.join(root, 'html', 'challenge.html');
+const builderPath = path.join(root, 'tools', 'build_pow_challenge.py');
+const protocolPath = path.join(root, 'src', 'pow_protocol.h');
 const scriptOpen = Buffer.from('<script>');
 const scriptClose = Buffer.from('</script>');
+const execFileAsync = promisify(execFile);
 
 
 export function extractExecutableScript(page) {
@@ -38,6 +44,74 @@ export async function readChallengeScript() {
 
 export async function readChallengePage() {
     return await fs.readFile(templatePath);
+}
+
+
+function emittedArray(header, name) {
+    const pattern = new RegExp(
+        `static const u_char\\s+${name}\\[\\]\\s*=\\s*\\{(.*?)\\};`,
+        's'
+    );
+    const match = pattern.exec(header);
+
+    if (match == null) {
+        throw new Error(`missing generated array ${name}`);
+    }
+
+    return Buffer.from([...match[1].matchAll(/0x([0-9a-f]{2})/g)]
+        .map((value) => Number.parseInt(value[1], 16)));
+}
+
+
+export async function buildChallengeArtifacts() {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(),
+        'ngx-powgate-page-'));
+    const output = path.join(temporary, 'pow_challenge_page.h');
+
+    try {
+        await execFileAsync('python3', [builderPath, templatePath, output], {
+            cwd: root
+        });
+        const header = await fs.readFile(output, 'ascii');
+        return {
+            digest: emittedArray(header,
+                'ngx_http_pow_script_sha256_base64'),
+            prefix: emittedArray(header, 'ngx_http_pow_challenge_prefix'),
+            suffix: emittedArray(header, 'ngx_http_pow_challenge_suffix')
+        };
+    } finally {
+        await fs.rm(temporary, { force: true, recursive: true });
+    }
+}
+
+
+export async function readProtocolConstants() {
+    const header = await fs.readFile(protocolPath, 'utf8');
+    const define = (name) => {
+        const match = new RegExp(`^#define ${name}\\s+(.+)$`, 'm')
+            .exec(header);
+        if (match == null) {
+            throw new Error(`missing protocol constant ${name}`);
+        }
+        return match[1].trim();
+    };
+    const number = (name) => Number(define(name).replace(/U?LL$/, ''));
+    const string = (name) => {
+        const value = define(name);
+        if (!/^"[^"]*"$/.test(value)) {
+            throw new Error(`nonliteral protocol string ${name}`);
+        }
+        return value.slice(1, -1);
+    };
+
+    return Object.freeze({
+        difficultyMax: number('POW_DIFFICULTY_MAX'),
+        difficultyMin: number('POW_DIFFICULTY_MIN'),
+        pageMaxBodyLen: number('POW_CHALLENGE_PAGE_MAX_BODY_LEN'),
+        proofCookieName: string('POW_PROOF_COOKIE_NAME'),
+        proofCounterMax: number('POW_PROOF_COUNTER_MAX'),
+        protocolVersion: number('POW_PROTOCOL_VERSION')
+    });
 }
 
 
@@ -230,7 +304,7 @@ export async function createControllerHarness(options = {}) {
             return timers.length;
         }
     };
-    const script = await readChallengeScript();
+    const script = options.script ?? await readChallengeScript();
     const context = evaluateChallengeScript(script, globals);
 
     return {

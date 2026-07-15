@@ -4,12 +4,15 @@ import test from 'node:test';
 
 import {
     createControllerHarness,
-    readChallengePage
+    readChallengePage,
+    readProtocolConstants
 } from './lib/challenge-script.mjs';
 
 
+const protocolConstants = await readProtocolConstants();
+const proofName = protocolConstants.proofCookieName;
 const validParams = JSON.stringify({
-    v: 1,
+    v: protocolConstants.protocolVersion,
     d: 8,
     b: '29333333',
     n: 'w4LNRcMugfb1vcxfspSXh2o9Q2S2iCRWaKsbV4_3GE8'
@@ -136,19 +139,19 @@ test('cleanup expires every visible proof-cookie path before mining',
         const harness = await initialized({
             pathname: '/alpha/beta',
             cookies: [
-                { name: '__pow_p', value: 'root', path: '/' },
-                { name: '__pow_p', value: 'alpha', path: '/alpha' },
-                { name: '__pow_p', value: 'slash', path: '/alpha/' },
-                { name: '__pow_p', value: 'exact', path: '/alpha/beta' },
+                { name: proofName, value: 'root', path: '/' },
+                { name: proofName, value: 'alpha', path: '/alpha' },
+                { name: proofName, value: 'slash', path: '/alpha/' },
+                { name: proofName, value: 'exact', path: '/alpha/beta' },
                 { name: '__pow_p_old', value: 'keep', path: '/' }
             ]
         });
 
         assert.deepEqual(harness.cookieWrites, [
-            '__pow_p=; Max-Age=0; Path=/; SameSite=Lax; Secure',
-            '__pow_p=; Max-Age=0; Path=/alpha; SameSite=Lax; Secure',
-            '__pow_p=; Max-Age=0; Path=/alpha/; SameSite=Lax; Secure',
-            '__pow_p=; Max-Age=0; Path=/alpha/beta; SameSite=Lax; Secure'
+            `${proofName}=; Max-Age=0; Path=/; SameSite=Lax; Secure`,
+            `${proofName}=; Max-Age=0; Path=/alpha; SameSite=Lax; Secure`,
+            `${proofName}=; Max-Age=0; Path=/alpha/; SameSite=Lax; Secure`,
+            `${proofName}=; Max-Age=0; Path=/alpha/beta; SameSite=Lax; Secure`
         ]);
         assert.equal(harness.document.cookie, '__pow_p_old=keep');
         assert.equal(harness.nodes['pow-status'].textContent,
@@ -160,7 +163,7 @@ test('HTTP cleanup omits Secure and unsafe schemes or paths fail',
     async () => {
         const http = await initialized({ protocol: 'http:' });
         assert.equal(http.cookieWrites[0],
-            '__pow_p=; Max-Age=0; Path=/; SameSite=Lax');
+            `${proofName}=; Max-Age=0; Path=/; SameSite=Lax`);
 
         for (const options of [
             { protocol: 'file:' },
@@ -178,7 +181,7 @@ test('HTTP cleanup omits Secure and unsafe schemes or paths fail',
 test('a proof cookie that survives cleanup fails closed', async () => {
     const harness = await initialized({
         cookies: [{
-            name: '__pow_p',
+            name: proofName,
             value: 'shadow',
             path: '/',
             undeletable: true
@@ -187,7 +190,7 @@ test('a proof cookie that survives cleanup fails closed', async () => {
 
     assertFailure(harness);
     assert.equal(harness.cookieWrites.length, 1);
-    assert.equal(harness.document.cookie, '__pow_p=shadow');
+    assert.equal(harness.document.cookie, `${proofName}=shadow`);
 });
 
 
@@ -397,8 +400,9 @@ test('success writes the canonical proof cookie and reloads once',
 
             await harness.runNextTimer();
             assert.equal(harness.cookieWrites.at(-1),
-                '__pow_p=1.29333333.34; Path=/; SameSite=Lax' + suffix);
-            assert.equal(harness.document.cookie, '__pow_p=1.29333333.34');
+                `${proofName}=1.29333333.34; Path=/; SameSite=Lax${suffix}`);
+            assert.equal(harness.document.cookie,
+                `${proofName}=1.29333333.34`);
             assert.equal(harness.nodes['pow-progress'].value, 1);
             assert.equal(harness.location.reloadCount, 1);
             assert.equal(harness.timers.length, 0);
@@ -426,7 +430,7 @@ test('failed proof-cookie readback never reloads', async () => {
 
         if (mode === 'duplicate') {
             harness.cookieEntries.push({
-                name: '__pow_p',
+                name: proofName,
                 value: 'shadow',
                 path: '/deep',
                 secure: false,
