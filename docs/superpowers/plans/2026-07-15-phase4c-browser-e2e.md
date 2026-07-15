@@ -1,5 +1,11 @@
 # Phase 4C Native Browser Verification Implementation Plan
 
+> **Partitioned negative-matrix amendment:** Task 7's parent-domain
+> construction is superseded by
+> `2026-07-16-phase4c-partitioned-negative-matrix.md`. That plan also supplies
+> the partitioned-case requirements consumed by Task 8. Do not implement the
+> parent-domain steps below; they remain only as historical planning context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a pinned, sandboxed native x86_64 Chromium gate that proves PowGate's complete browser loop under HTTP/1.1 and HTTP/2, repeats it against ASan+UBSan server artifacts, and records reproducible backend benchmark evidence.
