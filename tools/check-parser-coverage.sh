@@ -69,6 +69,11 @@ run_report "$coverage_dir/test_cookie-pow_cookie.gcno" pow_cookie.c.gcov
 check_function pow_cookie.c.gcov pow_cookie_parse
 rm -f pow_cookie.c.gcov
 
+run_report "$coverage_dir/test_cookie_scan-pow_cookie_scan.gcno" \
+    pow_cookie_scan.c.gcov
+check_function pow_cookie_scan.c.gcov pow_cookie_scan_next
+rm -f pow_cookie_scan.c.gcov
+
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

@@ -74,6 +74,12 @@ $(BUILD_DIR)/tests/test_cookie: tests/unit/test_cookie.c src/pow_cookie.c \
 		src/pow_cookie.c src/pow_challenge.c src/pow_crypto.c \
 		src/pow_parse.c -o $@ $(PURE_LDLIBS)
 
+$(BUILD_DIR)/tests/test_cookie_scan: tests/unit/test_cookie_scan.c \
+		src/pow_cookie_scan.c src/pow_cookie_scan.h tests/unit/test.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(PURE_CFLAGS) tests/unit/test_cookie_scan.c \
+		src/pow_cookie_scan.c -o $@
+
 $(BUILD_DIR)/tests/vector_v1.h: tests/vectors/v1.json tools/vector-to-c.py \
 		$(BUILD_DIR)/tests/vector-v1.verified
 	python3 tools/vector-to-c.py tests/vectors/v1.json $@
@@ -89,52 +95,79 @@ $(BUILD_DIR)/tests/test_vector: tests/unit/test_vector.c \
 
 test-unit: $(BUILD_DIR)/tests/test_parse $(BUILD_DIR)/tests/test_crypto \
 		$(BUILD_DIR)/tests/test_challenge $(BUILD_DIR)/tests/test_cookie \
-		$(BUILD_DIR)/tests/test_vector
+		$(BUILD_DIR)/tests/test_cookie_scan $(BUILD_DIR)/tests/test_vector
 	$(BUILD_DIR)/tests/test_parse
 	$(BUILD_DIR)/tests/test_crypto
 	$(BUILD_DIR)/tests/test_challenge
 	$(BUILD_DIR)/tests/test_cookie
+	$(BUILD_DIR)/tests/test_cookie_scan
 	$(BUILD_DIR)/tests/test_vector
 
-$(BUILD_DIR)/fuzz/fuzz_cookie: tests/fuzz/fuzz_cookie.c src/pow_cookie.c \
+$(BUILD_DIR)/fuzz/fuzz_auth_cookie: tests/fuzz/fuzz_auth_cookie.c \
+		src/pow_cookie.c \
 		src/pow_challenge.c src/pow_crypto.c src/pow_parse.c
 	@mkdir -p $(@D) $(BUILD_DIR)/fuzz/artifacts \
-		$(BUILD_DIR)/fuzz/corpus-cookie
-	clang $(CPPFLAGS) $(FUZZ_CFLAGS) tests/fuzz/fuzz_cookie.c \
+		$(BUILD_DIR)/fuzz/corpus-auth-cookie
+	clang $(CPPFLAGS) $(FUZZ_CFLAGS) tests/fuzz/fuzz_auth_cookie.c \
 		src/pow_cookie.c src/pow_challenge.c src/pow_crypto.c \
 		src/pow_parse.c -o $@ $(PURE_LDLIBS)
 
-$(BUILD_DIR)/fuzz/fuzz_proof: tests/fuzz/fuzz_proof.c \
+$(BUILD_DIR)/fuzz/fuzz_proof_cookie: tests/fuzz/fuzz_proof_cookie.c \
 		src/pow_challenge.c src/pow_crypto.c src/pow_parse.c
 	@mkdir -p $(@D) $(BUILD_DIR)/fuzz/artifacts \
-		$(BUILD_DIR)/fuzz/corpus-proof
-	clang $(CPPFLAGS) $(FUZZ_CFLAGS) tests/fuzz/fuzz_proof.c \
+		$(BUILD_DIR)/fuzz/corpus-proof-cookie
+	clang $(CPPFLAGS) $(FUZZ_CFLAGS) tests/fuzz/fuzz_proof_cookie.c \
 		src/pow_challenge.c src/pow_crypto.c src/pow_parse.c \
 		-o $@ $(PURE_LDLIBS)
 
-test-fuzz: $(BUILD_DIR)/fuzz/fuzz_cookie $(BUILD_DIR)/fuzz/fuzz_proof
-	@mkdir -p $(BUILD_DIR)/fuzz/corpus-cookie \
-		$(BUILD_DIR)/fuzz/corpus-proof $(BUILD_DIR)/fuzz/artifacts
-	$(BUILD_DIR)/fuzz/fuzz_cookie -max_total_time=60 -timeout=5 \
-		-max_len=257 \
-		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/cookie- \
-		$(BUILD_DIR)/fuzz/corpus-cookie tests/fuzz/corpus/cookie
-	$(BUILD_DIR)/fuzz/fuzz_proof -max_total_time=60 -timeout=5 \
-		-max_len=65 \
-		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/proof- \
-		$(BUILD_DIR)/fuzz/corpus-proof tests/fuzz/corpus/proof
+$(BUILD_DIR)/fuzz/fuzz_cookie_scan: tests/fuzz/fuzz_cookie_scan.c \
+		src/pow_cookie_scan.c src/pow_cookie_scan.h
+	@mkdir -p $(@D) $(BUILD_DIR)/fuzz/artifacts \
+		$(BUILD_DIR)/fuzz/corpus-cookie-scan
+	clang $(CPPFLAGS) $(FUZZ_CFLAGS) tests/fuzz/fuzz_cookie_scan.c \
+		src/pow_cookie_scan.c -o $@
 
-test-fuzz-long: $(BUILD_DIR)/fuzz/fuzz_cookie $(BUILD_DIR)/fuzz/fuzz_proof
-	@mkdir -p $(BUILD_DIR)/fuzz/corpus-cookie \
-		$(BUILD_DIR)/fuzz/corpus-proof $(BUILD_DIR)/fuzz/artifacts
-	$(BUILD_DIR)/fuzz/fuzz_cookie -max_total_time=600 -timeout=5 \
+test-fuzz: $(BUILD_DIR)/fuzz/fuzz_cookie_scan \
+		$(BUILD_DIR)/fuzz/fuzz_auth_cookie \
+		$(BUILD_DIR)/fuzz/fuzz_proof_cookie
+	@mkdir -p $(BUILD_DIR)/fuzz/corpus-cookie-scan \
+		$(BUILD_DIR)/fuzz/corpus-auth-cookie \
+		$(BUILD_DIR)/fuzz/corpus-proof-cookie \
+		$(BUILD_DIR)/fuzz/artifacts
+	$(BUILD_DIR)/fuzz/fuzz_cookie_scan -max_total_time=60 -timeout=5 \
+		-max_len=8192 \
+		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/cookie-scan- \
+		$(BUILD_DIR)/fuzz/corpus-cookie-scan \
+		tests/fuzz/corpus/cookie-scan
+	$(BUILD_DIR)/fuzz/fuzz_auth_cookie -max_total_time=60 -timeout=5 \
 		-max_len=257 \
-		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/cookie- \
-		$(BUILD_DIR)/fuzz/corpus-cookie tests/fuzz/corpus/cookie
-	$(BUILD_DIR)/fuzz/fuzz_proof -max_total_time=600 -timeout=5 \
+		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/auth-cookie- \
+		$(BUILD_DIR)/fuzz/corpus-auth-cookie tests/fuzz/corpus/cookie
+	$(BUILD_DIR)/fuzz/fuzz_proof_cookie -max_total_time=60 -timeout=5 \
 		-max_len=65 \
-		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/proof- \
-		$(BUILD_DIR)/fuzz/corpus-proof tests/fuzz/corpus/proof
+		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/proof-cookie- \
+		$(BUILD_DIR)/fuzz/corpus-proof-cookie tests/fuzz/corpus/proof
+
+test-fuzz-long: $(BUILD_DIR)/fuzz/fuzz_cookie_scan \
+		$(BUILD_DIR)/fuzz/fuzz_auth_cookie \
+		$(BUILD_DIR)/fuzz/fuzz_proof_cookie
+	@mkdir -p $(BUILD_DIR)/fuzz/corpus-cookie-scan \
+		$(BUILD_DIR)/fuzz/corpus-auth-cookie \
+		$(BUILD_DIR)/fuzz/corpus-proof-cookie \
+		$(BUILD_DIR)/fuzz/artifacts
+	$(BUILD_DIR)/fuzz/fuzz_cookie_scan -max_total_time=600 -timeout=5 \
+		-max_len=8192 \
+		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/cookie-scan- \
+		$(BUILD_DIR)/fuzz/corpus-cookie-scan \
+		tests/fuzz/corpus/cookie-scan
+	$(BUILD_DIR)/fuzz/fuzz_auth_cookie -max_total_time=600 -timeout=5 \
+		-max_len=257 \
+		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/auth-cookie- \
+		$(BUILD_DIR)/fuzz/corpus-auth-cookie tests/fuzz/corpus/cookie
+	$(BUILD_DIR)/fuzz/fuzz_proof_cookie -max_total_time=600 -timeout=5 \
+		-max_len=65 \
+		-artifact_prefix=$(BUILD_DIR)/fuzz/artifacts/proof-cookie- \
+		$(BUILD_DIR)/fuzz/corpus-proof-cookie tests/fuzz/corpus/proof
 
 $(BUILD_DIR)/coverage/test_parse: tests/unit/test_parse.c src/pow_parse.c
 	@mkdir -p $(@D)
@@ -155,13 +188,21 @@ $(BUILD_DIR)/coverage/test_cookie: tests/unit/test_cookie.c \
 		src/pow_cookie.c src/pow_challenge.c src/pow_crypto.c \
 		src/pow_parse.c -o $@ $(PURE_LDLIBS) $(COVERAGE_LDFLAGS)
 
+$(BUILD_DIR)/coverage/test_cookie_scan: tests/unit/test_cookie_scan.c \
+		src/pow_cookie_scan.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(COVERAGE_CFLAGS) tests/unit/test_cookie_scan.c \
+		src/pow_cookie_scan.c -o $@ $(COVERAGE_LDFLAGS)
+
 test-coverage: $(BUILD_DIR)/coverage/test_parse \
 		$(BUILD_DIR)/coverage/test_challenge \
-		$(BUILD_DIR)/coverage/test_cookie
+		$(BUILD_DIR)/coverage/test_cookie \
+		$(BUILD_DIR)/coverage/test_cookie_scan
 	@rm -f $(BUILD_DIR)/coverage/*.gcda
 	$(BUILD_DIR)/coverage/test_parse
 	$(BUILD_DIR)/coverage/test_challenge
 	$(BUILD_DIR)/coverage/test_cookie
+	$(BUILD_DIR)/coverage/test_cookie_scan
 	./tools/check-parser-coverage.sh $(BUILD_DIR)/coverage
 
 module: $(CHALLENGE_HEADER)

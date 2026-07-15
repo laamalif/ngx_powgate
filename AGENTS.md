@@ -122,11 +122,14 @@ make test-e2e        # node-based solver runs the real challenge JS end-to-end
 
 # Introduced in Phase 1 with the real pure core; never placeholder targets.
 make test-unit       # pure-function unit tests (no NGINX needed)
-make test-fuzz       # 60s smoke run of both fuzzers (libFuzzer, ASan)
+make test-fuzz       # 60s smoke run of all three fuzzers
 make test-fuzz-long  # 10min run, required before any release tag
 make asan            # full rebuild + unit + integration under ASan/UBSan
 make check           # everything above except fuzz-long; the pre-commit gate
 ```
+
+The exact fuzz targets are `fuzz_cookie_scan`, `fuzz_auth_cookie`, and
+`fuzz_proof_cookie`.
 
 The Phase 0 gate is `make check-policy`, `make module`,
 `make test-integration`, and `make test-e2e`. Phase 1 introduces the
@@ -154,10 +157,10 @@ the same commit that introduces any new rule.
 3. **No `malloc`/`free` in request context.** `ngx_pnalloc`/`ngx_pcalloc`
    from `r->pool`; config-time allocations from `cf->pool`. Check every
    allocation for NULL.
-4. **Parsers are pure functions.** `pow_parse.c`, `pow_cookie.c`,
-   `pow_challenge.c`, and `pow_crypto.c` include no NGINX headers. Their public
-   APIs use C99 `stdint.h`/`stddef.h` types, caller-provided fixed buffers, and
-   zero allocation — signature style:
+4. **Parsers are pure functions.** `pow_parse.c`, `pow_cookie_scan.c`,
+   `pow_cookie.c`, `pow_challenge.c`, and `pow_crypto.c` include no NGINX
+   headers. Their public APIs use C99 `stdint.h`/`stddef.h` types,
+   caller-provided fixed buffers, and zero allocation — signature style:
    `int pow_cookie_parse(const uint8_t *buf, size_t len, pow_cookie_t *out)`.
    This is what keeps the fuzz harnesses at 20 lines.
 5. **Length gate before parsing.** Cookie value > 256 bytes or proof
@@ -216,8 +219,8 @@ the same commit that introduces any new rule.
   add `-Wconversion` there (nginx headers don't compile under it) and
   never weaken `-Werror`. Hardening flags go through `--with-cc-opt` only.
   The **pure core is held to a stricter bar**: `pow_parse.c`, `pow_crypto.c`,
-  `pow_cookie.c`, and `pow_challenge.c` include no nginx headers, so the
-  unit/fuzz builds compile them with
+  `pow_cookie_scan.c`, `pow_cookie.c`, and `pow_challenge.c` include no nginx
+  headers, so the unit/fuzz builds compile them with
   `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror` — warning-free
   under the full set, no exceptions.
 - Naming: module-side identifiers are fully prefixed
@@ -268,9 +271,10 @@ the same commit that introduces any new rule.
   it as internal, or bypass protection.
 - If either `Set-Cookie` allocation after a valid proof fails, return
   `NGX_HTTP_INTERNAL_SERVER_ERROR`; never pass the request through cookieless.
-- The `pow_parse`, `pow_crypto`, `pow_cookie`, and `pow_challenge` source and
-  header families are NGINX-free: C99 `stdint.h`/`stddef.h` types only, zero
-  allocation, caller-provided fixed structs.
+- The `pow_parse`, `pow_crypto`, `pow_cookie_scan`, `pow_cookie`, and
+  `pow_challenge` source and header families are NGINX-free: C99
+  `stdint.h`/`stddef.h` types only, zero allocation, caller-provided fixed
+  structs.
 - New parser behavior = new table rows + new fuzz corpus seeds in the
   same commit.
 
