@@ -135,13 +135,120 @@ function sha256(bytes) {
   return digest;
 }
 
+function proofMessage(nonce, counter) {
+  const text = String(counter);
+  const message = new Uint8Array(nonce.length + text.length);
+
+  message.set(nonce);
+  for (let index = 0; index < text.length; index++) {
+    message[nonce.length + index] = text.charCodeAt(index);
+  }
+
+  return message;
+}
+
+function meetsDifficulty(digest, difficulty) {
+  const bytes = Math.floor(difficulty / 8);
+
+  for (let index = 0; index < bytes; index++) {
+    if (digest[index] !== 0) {
+      return false;
+    }
+  }
+
+  const bits = difficulty % 8;
+  return bits === 0 || (digest[bytes] >>> (8 - bits)) === 0;
+}
+
+function solveResult(found, exhausted, counter, nextCounter, attempts) {
+  return Object.freeze({
+    found,
+    exhausted,
+    counter,
+    nextCounter,
+    attempts
+  });
+}
+
+function validateSolve(nonce, difficulty, startCounter, maxAttempts,
+  backend) {
+  if (!(nonce instanceof Uint8Array) || nonce.length !== 32
+    || !Number.isInteger(difficulty) || difficulty < 1 || difficulty > 32
+    || !Number.isSafeInteger(startCounter) || startCounter < 0
+    || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1
+    || (backend !== 'js' && backend !== 'subtle')) {
+    throw new TypeError('solver arguments');
+  }
+}
+
+function solveJs(nonce, difficulty, startCounter, maxAttempts) {
+  let attempts = 0;
+  let candidate = startCounter;
+
+  for (;;) {
+    const digest = sha256(proofMessage(nonce, candidate));
+    attempts++;
+
+    if (meetsDifficulty(digest, difficulty)) {
+      return solveResult(true, false, candidate, null, attempts);
+    }
+
+    if (candidate === Number.MAX_SAFE_INTEGER) {
+      return solveResult(false, true, null, null, attempts);
+    }
+
+    candidate++;
+    if (attempts === maxAttempts) {
+      return solveResult(false, false, null, candidate, attempts);
+    }
+  }
+}
+
+async function solveSubtle(nonce, difficulty, startCounter, maxAttempts) {
+  const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
+
+  if (subtle == null || typeof subtle.digest !== 'function') {
+    throw new Error('digest unavailable');
+  }
+
+  let attempts = 0;
+  let candidate = startCounter;
+
+  for (;;) {
+    const message = proofMessage(nonce, candidate);
+    const output = await subtle.digest('SHA-256', message);
+    const digest = new Uint8Array(output);
+
+    if (digest.length !== 32) {
+      throw new Error('digest failed');
+    }
+
+    attempts++;
+
+    if (meetsDifficulty(digest, difficulty)) {
+      return solveResult(true, false, candidate, null, attempts);
+    }
+
+    if (candidate === Number.MAX_SAFE_INTEGER) {
+      return solveResult(false, true, null, null, attempts);
+    }
+
+    candidate++;
+    if (attempts === maxAttempts) {
+      return solveResult(false, false, null, candidate, attempts);
+    }
+  }
+}
+
 async function solve(nonce, difficulty, startCounter, maxAttempts, backend) {
-  void nonce;
-  void difficulty;
-  void startCounter;
-  void maxAttempts;
-  void backend;
-  throw new Error('solver unavailable');
+  validateSolve(nonce, difficulty, startCounter, maxAttempts, backend);
+  const nonceCopy = nonce.slice();
+
+  if (backend === 'js') {
+    return solveJs(nonceCopy, difficulty, startCounter, maxAttempts);
+  }
+
+  return solveSubtle(nonceCopy, difficulty, startCounter, maxAttempts);
 }
 
 globalThis.PowGateSolver = Object.freeze({ sha256, solve });
