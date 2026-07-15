@@ -3,6 +3,8 @@ SHELL := /bin/sh
 NGX_SOURCE_DIR ?= /opt/ngx-powgate/nginx-source
 MODULE := out/ngx_http_pow_module.so
 BUILD_DIR ?= build
+GENERATED_DIR := build/generated
+CHALLENGE_HEADER := $(GENERATED_DIR)/pow_challenge_page.h
 PURE_CFLAGS := -std=c99 -Wall -Wextra -Wpedantic -Wconversion \
 	-Wshadow -Werror -Isrc
 PURE_LDLIBS := -lcrypto
@@ -11,11 +13,21 @@ FUZZ_CFLAGS := $(PURE_CFLAGS) -fsanitize=fuzzer,address,undefined \
 COVERAGE_CFLAGS := $(PURE_CFLAGS) -O0 --coverage
 COVERAGE_LDFLAGS := --coverage
 
-.PHONY: check-policy module test-unit test-vector-python test-fuzz \
-	test-fuzz-long test-coverage test-integration test-e2e asan check clean
+.PHONY: check-policy challenge-page module test-tools test-unit \
+	test-vector-python test-fuzz test-fuzz-long test-coverage \
+	test-integration test-e2e asan check clean
 
 check-policy:
 	./tools/check-policy.sh
+
+$(CHALLENGE_HEADER): html/challenge.html tools/build_pow_challenge.py
+	@mkdir -p $(@D)
+	python3 tools/build_pow_challenge.py $< $@
+
+challenge-page: $(CHALLENGE_HEADER)
+
+test-tools:
+	python3 -m unittest -v tests.tools.test_build_pow_challenge
 
 $(BUILD_DIR)/tests/vector-v1.verified: tools/refsolve.py \
 		tests/vectors/v1.json
@@ -149,7 +161,7 @@ test-coverage: $(BUILD_DIR)/coverage/test_parse \
 	$(BUILD_DIR)/coverage/test_cookie
 	./tools/check-parser-coverage.sh $(BUILD_DIR)/coverage
 
-module:
+module: $(CHALLENGE_HEADER)
 	@set -eu; \
 	test -f "$(NGX_SOURCE_DIR)/src/core/nginx.h"; \
 	mkdir -p out; \
@@ -175,8 +187,9 @@ test-e2e: module
 asan: check-policy
 	./tools/run-asan.sh
 
-check: check-policy test-unit test-coverage module test-integration \
+check: check-policy test-tools test-unit test-coverage module test-integration \
 		test-e2e test-fuzz asan
 
 clean:
-	rm -rf $(BUILD_DIR)/coverage $(BUILD_DIR)/fuzz $(BUILD_DIR)/tests out
+	rm -rf $(BUILD_DIR)/coverage $(BUILD_DIR)/fuzz $(BUILD_DIR)/tests \
+		$(GENERATED_DIR) out

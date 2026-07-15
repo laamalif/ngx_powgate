@@ -21,6 +21,28 @@
 #define POW_CHALLENGE_NONCE_PREFIX      "; n="
 #define POW_CHALLENGE_NONCE_PREFIX_LEN  4
 
+#define POW_CHALLENGE_JSON_PREFIX       \
+    "<script type=\"application/json\" id=\"pow-params\">{\"v\":" \
+    POW_VERSION_TEXT ",\"d\":"
+#define POW_CHALLENGE_JSON_BUCKET_PREFIX ",\"b\":\""
+#define POW_CHALLENGE_JSON_NONCE_PREFIX "\",\"n\":\""
+#define POW_CHALLENGE_JSON_SUFFIX       "\"}</script>"
+
+#define POW_CSP_HASH_MARKER             "<H>"
+#define POW_CSP_HASH_MARKER_LEN         3
+#define POW_CSP_SCRIPT_HASH_LEN         44
+#define POW_CSP_POLICY_TEMPLATE         \
+    "default-src 'none'; base-uri 'none'; form-action 'none'; " \
+    "frame-ancestors 'none'; script-src 'sha256-" \
+    POW_CSP_HASH_MARKER "'; style-src 'unsafe-inline'"
+
+#define POW_HTML_CONTENT_TYPE           "text/html; charset=utf-8"
+#define POW_CACHE_CONTROL_HEADER_NAME   "Cache-Control"
+#define POW_CACHE_CONTROL_HEADER_VALUE  "no-store"
+#define POW_ROBOTS_HEADER_NAME          "X-Robots-Tag"
+#define POW_ROBOTS_HEADER_VALUE         "noindex"
+#define POW_CSP_HEADER_NAME             "Content-Security-Policy"
+
 #define POW_SECRET_LEN                  32
 #define POW_IPV4_LEN                    4
 #define POW_IP_LEN                      16
@@ -42,6 +64,13 @@
     (POW_CHALLENGE_VERSION_PREFIX_LEN + POW_DIFFICULTY_DECIMAL_MAX_LEN \
      + POW_CHALLENGE_BUCKET_PREFIX_LEN + POW_BUCKET_DECIMAL_MAX_LEN \
      + POW_CHALLENGE_NONCE_PREFIX_LEN + POW_NONCE_B64URL_LEN)
+#define POW_CHALLENGE_JSON_MAX_LEN       \
+    (sizeof(POW_CHALLENGE_JSON_PREFIX) - 1 \
+     + POW_DIFFICULTY_DECIMAL_MAX_LEN \
+     + sizeof(POW_CHALLENGE_JSON_BUCKET_PREFIX) - 1 \
+     + POW_BUCKET_DECIMAL_MAX_LEN \
+     + sizeof(POW_CHALLENGE_JSON_NONCE_PREFIX) - 1 \
+     + POW_NONCE_B64URL_LEN + sizeof(POW_CHALLENGE_JSON_SUFFIX) - 1)
 
 #define POW_AUTH_PAYLOAD_B64_LEN        14
 #define POW_AUTH_MAC_B64_LEN            22
