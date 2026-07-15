@@ -41,6 +41,14 @@ fallback, mines in bounded foreground slices, pauses while hidden, and writes
 the fixed proof cookie before reloading. Failures become a static retry UI;
 they do not expose exception details or enter reload loops.
 
+The pure-JavaScript mining kernel reuses invocation-local fixed-shape SHA-256
+workspace and creates no explicit typed-array, message-buffer, or digest
+object per candidate. The sequential SubtleCrypto backend reuses one backing
+buffer per invocation and passes one exact-length view per awaited provider
+call. Before mining, the controller clears every safely serializable derived
+proof-cookie path, always including `/`, and fails closed if any exact
+`__pow_p` occurrence remains visible.
+
 Node tests execute the exact production script and a real NGINX HTTPS smoke
 test verifies served-byte and CSP-hash identity. Phase 4C still owns the
 real-browser proof of CSP enforcement, native cookie behavior, reload, auth

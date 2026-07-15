@@ -193,6 +193,7 @@ function makeNode(textContent = '') {
 export async function createControllerHarness(options = {}) {
     const protocol = options.protocol ?? 'https:';
     const pathname = options.pathname ?? '/';
+    const search = options.search ?? '';
     const cookieEntries = (options.cookies ?? []).map((entry) => ({
         name: entry.name,
         value: entry.value,
@@ -289,6 +290,7 @@ export async function createControllerHarness(options = {}) {
     const location = {
         pathname,
         protocol,
+        search,
         reloadCount: 0,
         reload() {
             this.reloadCount++;

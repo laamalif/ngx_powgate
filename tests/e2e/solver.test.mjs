@@ -49,6 +49,57 @@ function fixedCrypto(byte, messages = []) {
 }
 
 
+function capturingCrypto(byte, records, gate = null) {
+    let active = 0;
+    let maximumActive = 0;
+
+    return {
+        get maximumActive() {
+            return maximumActive;
+        },
+        subtle: {
+            async digest(algorithm, view) {
+                assert.equal(algorithm, 'SHA-256');
+                active++;
+                try {
+                    maximumActive = Math.max(maximumActive, active);
+                    const record = {
+                        backing: view.buffer,
+                        byteLength: view.byteLength,
+                        byteOffset: view.byteOffset,
+                        bytes: Buffer.from(view),
+                        bytesAfterWait: null
+                    };
+                    records.push(record);
+                    if (gate != null) {
+                        await gate();
+                    }
+                    record.bytesAfterWait = Buffer.from(view);
+                    return new Uint8Array(32).fill(byte).buffer;
+                } finally {
+                    active--;
+                }
+            }
+        }
+    };
+}
+
+
+function recordingWebcrypto(records) {
+    return {
+        subtle: {
+            async digest(algorithm, view) {
+                records.push({
+                    byteLength: view.byteLength,
+                    bytes: Buffer.from(view)
+                });
+                return webcrypto.subtle.digest(algorithm, view);
+            }
+        }
+    };
+}
+
+
 function maxCounterNonce(valid) {
     const counter = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'ascii');
 
@@ -68,6 +119,32 @@ function maxCounterNonce(valid) {
 
 function expectedDigest(bytes) {
     return createHash('sha256').update(bytes).digest();
+}
+
+
+function countedTypedArray(Base, name, records) {
+    return class extends Base {
+        constructor(...args) {
+            super(...args);
+            records.push({ name, length: this.length });
+        }
+    };
+}
+
+
+function allocationMultiset(records) {
+    return records.map(({ name, length }) => `${name}:${length}`).sort();
+}
+
+
+function assertNoDifficulty32Winner(nonce, startCounter, attempts) {
+    for (let offset = 0; offset < attempts; offset++) {
+        const counter = Buffer.from(String(startCounter + offset), 'ascii');
+        const digest = expectedDigest(Buffer.concat([nonce, counter]));
+
+        assert.notEqual(digest.readUInt32BE(0), 0,
+            `independent fixture unexpectedly wins at ${startCounter + offset}`);
+    }
 }
 
 
@@ -96,14 +173,24 @@ test('installs the exact frozen two-function namespace', async () => {
 test('generator hashes the exact executable production bytes', async () => {
     const script = await readChallengeScript();
     const artifacts = await buildChallengeArtifacts();
+    const constants = await readProtocolConstants();
     const reconstructed = Buffer.concat([
         artifacts.prefix,
         artifacts.suffix
     ]);
+    const maximumJson = Buffer.from(
+        '<script type="application/json" id="pow-params">'
+        + '{"v":1,"d":32,"b":"99999999999999999999",'
+        + '"n":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}'
+        + '</script>',
+        'ascii'
+    );
 
     assert.deepEqual(extractExecutableScript(reconstructed), script);
     assert.equal(artifacts.digest.toString('ascii'),
         createHash('sha256').update(script).digest('base64'));
+    assert.ok(artifacts.prefix.length + maximumJson.length
+        + artifacts.suffix.length < constants.pageMaxBodyLen);
 });
 
 
@@ -143,7 +230,94 @@ test('sha256 matches fixed messages and padding boundaries', async () => {
         assert.equal(first.length, 32);
         assert.notEqual(first, second);
         assert.deepEqual(first, second);
+        first[0] ^= 0xff;
+        assert.deepEqual(Buffer.from(second), expectedDigest(bytes));
+        assert.deepEqual(Buffer.from(solver.sha256(bytes)),
+            expectedDigest(bytes));
     }
+});
+
+
+test('specialized JS proof path has the KAT difficulty boundary',
+    async () => {
+        const vector = JSON.parse(await fs.readFile(
+            path.join(root, 'tests', 'vectors', 'v1.json'), 'utf8'));
+        const nonce = new Uint8Array(Buffer.from(
+            vector.cases[0].nonce_hex, 'hex'));
+        const solver = await loadSolver();
+
+        for (const difficulty of [8, 10]) {
+            assert.deepEqual(resultValues(await solver.solve(
+                nonce, difficulty, 34, 1, 'js')), {
+                found: true,
+                exhausted: false,
+                counter: 34,
+                nextCounter: null,
+                attempts: 1
+            });
+        }
+
+        assert.deepEqual(resultValues(await solver.solve(
+            nonce, 11, 34, 1, 'js')), {
+            found: false,
+            exhausted: false,
+            counter: null,
+            nextCounter: 35,
+            attempts: 1
+        });
+    });
+
+
+test('JS typed-array allocation is constant per bounded solve', async () => {
+    const records = [];
+    const Uint8 = countedTypedArray(Uint8Array, 'u8', records);
+    const Uint32 = countedTypedArray(Uint32Array, 'u32', records);
+    const script = await readChallengeScript();
+    const context = evaluateChallengeScript(script, {
+        Uint8Array: Uint8,
+        Uint32Array: Uint32
+    });
+    const nonce = new Uint8(32);
+
+    assertNoDifficulty32Winner(Buffer.alloc(32), 0, 1000);
+
+    const deltas = [];
+    for (const maxAttempts of [1, 10, 1000]) {
+        const before = records.length;
+        const result = await context.PowGateSolver.solve(
+            nonce, 32, 0, maxAttempts, 'js');
+
+        assert.equal(result.found, false);
+        assert.equal(result.attempts, maxAttempts);
+        const delta = records.slice(before);
+        assert.deepEqual(delta[0], { name: 'u8', length: 32 });
+        deltas.push(allocationMultiset(delta));
+    }
+
+    /* This is the accepted implementation layout, not a public API. */
+    assert.deepEqual(deltas[0], [
+        'u32:64', 'u32:8', 'u8:16', 'u8:32', 'u8:64'
+    ]);
+    assert.deepEqual(deltas[1], deltas[0]);
+    assert.deepEqual(deltas[2], deltas[0]);
+});
+
+
+test('separate JS solve calls own separate workspaces', async () => {
+    const solver = await loadSolver();
+    const nonceA = new Uint8Array(32);
+    const nonceB = new Uint8Array(32).fill(0xa5);
+    const expectedA = resultValues(await solver.solve(nonceA, 32, 3, 7,
+        'js'));
+    const expectedB = resultValues(await solver.solve(nonceB, 32, 19, 5,
+        'js'));
+    const [actualA, actualB] = await Promise.all([
+        solver.solve(nonceA, 32, 3, 7, 'js'),
+        solver.solve(nonceB, 32, 19, 5, 'js')
+    ]);
+
+    assert.deepEqual(resultValues(actualA), expectedA);
+    assert.deepEqual(resultValues(actualB), expectedB);
 });
 
 
@@ -277,6 +451,61 @@ test('subtle search is sequential, contiguous, and resumable', async () => {
 });
 
 
+test('both proof paths use canonical decimal boundaries', async () => {
+    const counters = [
+        0, 1, 9, 10, 99, 100,
+        999999999999999,
+        1000000000000000,
+        Number.MAX_SAFE_INTEGER
+    ];
+
+    for (const counter of counters) {
+        const records = [];
+        const nonce = new Uint8Array(32).fill(0x5a);
+        const solver = await loadSolver({
+            crypto: capturingCrypto(0xff, records)
+        });
+        await solver.solve(nonce, 32, counter, 1, 'subtle');
+        const expected = Buffer.concat([
+            Buffer.alloc(32, 0x5a),
+            Buffer.from(String(counter), 'ascii')
+        ]);
+
+        assert.equal(records.length, 1);
+        assert.equal(records[0].byteOffset, 0);
+        assert.equal(records[0].byteLength, expected.length);
+        assert.deepEqual(records[0].bytes, expected);
+
+        const js = await (await loadSolver()).solve(
+            nonce, 32, counter, 1, 'js');
+        const digest = expectedDigest(expected);
+        assert.equal(js.found, digest.readUInt32BE(0) === 0);
+    }
+});
+
+
+test('subtle encodes the final safe counter exactly once', async () => {
+    const maximum = Number.MAX_SAFE_INTEGER;
+
+    for (const valid of [true, false]) {
+        const records = [];
+        const nonce = maxCounterNonce(valid);
+        const solver = await loadSolver({
+            crypto: recordingWebcrypto(records)
+        });
+        const result = await solver.solve(nonce, 1, maximum, 4, 'subtle');
+
+        assert.equal(records.length, 1);
+        assert.equal(records[0].byteLength, 48);
+        assert.equal(records[0].bytes.subarray(32).toString('ascii'),
+            '9007199254740991');
+        assert.equal(result.found, valid);
+        assert.equal(result.exhausted, !valid);
+        assert.equal(result.attempts, 1);
+    }
+});
+
+
 test('solve snapshots the nonce before asynchronous search', async () => {
     const messages = [];
     let releaseFirst;
@@ -305,6 +534,52 @@ test('solve snapshots the nonce before asynchronous search', async () => {
     assert.equal(messages.length, 2);
     assert.deepEqual(messages[0].subarray(0, 32), Buffer.alloc(32));
     assert.deepEqual(messages[1].subarray(0, 32), Buffer.alloc(32));
+});
+
+
+test('subtle calls sharing a caller nonce own isolated snapshots', async () => {
+    let waiting = 0;
+    let release;
+    let allWaiting;
+    const released = new Promise((resolve) => {
+        release = resolve;
+    });
+    const reachedProvider = new Promise((resolve) => {
+        allWaiting = resolve;
+    });
+    const gate = async () => {
+        waiting++;
+        if (waiting === 2) {
+            allWaiting();
+        }
+        await released;
+    };
+    const records = [];
+    const nonce = new Uint8Array(32);
+    const solver = await loadSolver({
+        crypto: capturingCrypto(0xff, records, gate)
+    });
+    const first = solver.solve(nonce, 1, 0, 2, 'subtle');
+    const second = solver.solve(nonce, 1, 2, 2, 'subtle');
+
+    await reachedProvider;
+    nonce.fill(0xa5);
+    release();
+    await Promise.all([first, second]);
+
+    const byCounter = new Map(records.map((record) => [
+        record.bytes.subarray(32).toString('ascii'), record
+    ]));
+    assert.equal(records.length, 4);
+    assert.deepEqual([...byCounter.keys()].sort(), ['0', '1', '2', '3']);
+    for (const record of records) {
+        assert.deepEqual(record.bytes.subarray(0, 32), Buffer.alloc(32));
+        assert.deepEqual(record.bytesAfterWait, record.bytes);
+    }
+    assert.equal(byCounter.get('0').backing, byCounter.get('1').backing);
+    assert.equal(byCounter.get('2').backing, byCounter.get('3').backing);
+    assert.notEqual(byCounter.get('0').backing,
+        byCounter.get('2').backing);
 });
 
 

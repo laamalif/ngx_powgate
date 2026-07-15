@@ -502,6 +502,16 @@ Tasks:
    identity from template through generator and CSP digest. The HTTPS smoke
    executes the exact served bytes against NGINX 1.30.3. `node:vm` supplies a
    deterministic harness, not a security boundary.
+7. The pure-JavaScript mining path uses one invocation-local, fixed-shape
+   single-block workspace and shares one SHA-256 compression primitive with
+   public `sha256()`. The pure-JavaScript kernel creates no explicit typed
+   array, message buffer, or digest object per candidate. Both backends use
+   one direct canonical-decimal encoder. The sequential SubtleCrypto backend
+   reuses one invocation-local backing buffer and passes one exact-length view
+   per awaited provider call. Cleanup always attempts `/`, skips only unsafe
+   complete derived Path candidates, and still requires zero visible
+   `__pow_p` occurrences before mining. Literal semicolons are skipped;
+   percent-encoded `%3B` is preserved.
 
 **Gate:** `make check` green with no skipped, TODO, placeholder, or test-only
 production behavior. Phase 4C retains real-browser CSP enforcement, native
@@ -523,7 +533,11 @@ Tasks:
    server/JS encoding drift — it is mandatory, not optional.
 2. Fuzz corpora expanded with real cookie/proof shapes captured from the
    e2e run.
-3. Solver backend measurement (from 4B) recorded; loser wired as fallback.
+3. Measure the already-correct JavaScript kernel and sequential SubtleCrypto
+   backend in recorded real-browser/device environments, including throughput
+   and event-loop responsiveness. Choose one fixed backend order from that
+   evidence and make only measurement-supported tuning; no Node timing
+   threshold or mid-search fallback is introduced.
 
 **Gate:** `make check && make test-e2e` green; fuzz-long re-run clean.
 

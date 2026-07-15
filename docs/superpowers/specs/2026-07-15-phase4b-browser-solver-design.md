@@ -1,5 +1,11 @@
 # Phase 4B browser solver design
 
+> **Corrective specification:** The allocation discipline, specialized
+> single-block proof kernel, SubtleCrypto input preparation, runtime KAT, and
+> pathname cleanup rules are superseded by
+> [the Phase 4B corrective design](2026-07-15-phase4b-corrective-design.md).
+> All other contracts in this document remain in force.
+
 ## Status and scope
 
 Phase 4B replaces the inert challenge-page script with the real browser
