@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import re
 import stat
 import subprocess
 import tempfile
@@ -225,6 +226,15 @@ class RequireBrowserX86Test(unittest.TestCase):
 
 
 class BrowserMakeTargetsTest(unittest.TestCase):
+    def test_browser_e2e_requires_partitioned_observer_equivalence(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        match = re.search(r"^test-browser-e2e:([^\n]*)$", makefile, re.MULTILINE)
+
+        self.assertIsNotNone(match)
+        self.assertIn(
+            "test-browser-partitioned-observer-equivalence", match.group(1)
+        )
+
     def test_browser_aggregate_is_sequential_and_bounded(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         for target in APPROVED:

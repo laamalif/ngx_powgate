@@ -20,6 +20,7 @@ COVERAGE_LDFLAGS := --coverage
 	test-vector-python test-fuzz test-fuzz-long test-coverage \
 	test-integration test-js test-e2e asan check clean \
 	test-browser-feasibility test-browser-e2e \
+	test-browser-partitioned-observer-equivalence \
 	test-browser-partitioned-feasibility benchmark-browser \
 	check-browser-x86
 
@@ -258,7 +259,12 @@ test-browser-feasibility:
 	timeout --signal=TERM --kill-after=20s 160s \
 		node tests/browser/feasibility.mjs
 
-test-browser-e2e: browser-tools
+test-browser-partitioned-observer-equivalence: browser-tools module
+	./tools/require-browser-x86.sh test-browser-e2e
+	timeout --signal=TERM --kill-after=20s 160s \
+		node tests/browser/partitioned-observer-equivalence.mjs
+
+test-browser-e2e: test-browser-partitioned-observer-equivalence browser-tools
 	./tools/require-browser-x86.sh test-browser-e2e
 	$(MAKE) module
 	timeout --signal=TERM --kill-after=20s 580s \
