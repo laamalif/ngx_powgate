@@ -21,6 +21,7 @@ import {
     ObservationBuffer,
     buildChromiumLaunchArguments,
     buildDiagnosticBundle,
+    classifyConsoleMessage,
     identityStillMatches,
     isNginxBindCollision,
     readProcessIdentity,
@@ -67,6 +68,24 @@ const expectedFailures = Object.freeze([
     'internal_invariant',
     'cleanup',
 ]);
+
+
+test('console classification admits only the exact expected 503 diagnostic', () => {
+    const options = { allowChallengeStatusConsole: true };
+
+    assert.equal(classifyConsoleMessage(
+        'Failed to load resource: the server responded with a status of 503 ()',
+        options,
+    ), 'challenge_status');
+    assert.equal(classifyConsoleMessage(
+        'Failed to load resource: the server responded with a status of 403 ()',
+        options,
+    ), 'unexpected');
+    assert.equal(classifyConsoleMessage(
+        'Failed to load resource: arbitrary failure', options,
+    ), 'unexpected');
+    assert.equal(classifyConsoleMessage('visitor controlled', options), 'unexpected');
+});
 
 
 test('freezes every Phase 4C deadline, failure category and capture limit', () => {

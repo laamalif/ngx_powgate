@@ -542,27 +542,16 @@ class BrowserSession {
 
     #observePage(page) {
         this.pages.add(page);
-        const allowedConsole = new Set(
-            this.options.observe?.consoleIdentifiers ?? [],
-        );
         const allowedErrors = new Set(
             this.options.observe?.pageErrorIdentifiers ?? [],
         );
         page.on('console', (message) => {
-            const text = message.text();
-            const cspIdentifier = this.options.observe?.allowCspConsole === true
-                && (text.startsWith('Refused to execute inline script')
-                    || text.includes('Content Security Policy'))
-                ? 'csp_enforcement' : null;
-            const networkIdentifier = this.options.observe
-                ?.allowNetworkFailureConsole === true
-                && text.startsWith('Failed to load resource:')
-                ? 'network_failure' : null;
             this.#record(Object.freeze({
                 type: 'console',
                 consoleType: message.type(),
-                identifier: allowedConsole.has(text) ? text
-                    : cspIdentifier ?? networkIdentifier ?? 'unexpected',
+                identifier: classifyConsoleMessage(
+                    message.text(), this.options.observe,
+                ),
             }));
         });
         page.on('pageerror', (error) => {
@@ -1099,6 +1088,36 @@ export class BrowserTestFailure extends Error {
         this.cleanupFailures = [];
         Object.freeze(this);
     }
+}
+
+
+export function classifyConsoleMessage(text, options = {}) {
+    if (typeof text !== 'string' || options === null
+        || typeof options !== 'object' || Array.isArray(options)) {
+        throw new TypeError('invalid console observation');
+    }
+    const allowed = new Set(options.consoleIdentifiers ?? []);
+    if (allowed.has(text)) {
+        return text;
+    }
+    if (options.allowChallengeStatusConsole === true
+        && /^Failed to load resource: the server responded with a status of 503(?:\s|$)/u
+            .test(text))
+    {
+        return 'challenge_status';
+    }
+    if (options.allowCspConsole === true
+        && (text.startsWith('Refused to execute inline script')
+            || text.includes('Content Security Policy')))
+    {
+        return 'csp_enforcement';
+    }
+    if (options.allowNetworkFailureConsole === true
+        && text.startsWith('Failed to load resource:'))
+    {
+        return 'network_failure';
+    }
+    return 'unexpected';
 }
 
 

@@ -257,10 +257,11 @@ test-browser-feasibility:
 	timeout --signal=TERM --kill-after=20s 160s \
 		node tests/browser/feasibility.mjs
 
-test-browser-e2e:
+test-browser-e2e: browser-tools
 	./tools/require-browser-x86.sh test-browser-e2e
 	$(MAKE) module
-	timeout --signal=TERM --kill-after=20s 580s node tests/browser/e2e.mjs
+	timeout --signal=TERM --kill-after=20s 580s \
+		node tests/browser/e2e.mjs --server-build normal
 
 benchmark-browser:
 	./tools/require-browser-x86.sh benchmark-browser
