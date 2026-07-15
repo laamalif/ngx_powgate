@@ -189,7 +189,7 @@ test('cleanup expires every visible proof-cookie path before mining',
     });
 
 
-test('HTTP cleanup omits Secure and unsafe schemes or paths fail',
+test('HTTP cleanup omits Secure and invalid scheme or relative path fails',
     async () => {
         const http = await initialized({ protocol: 'http:' });
         assert.equal(http.cookieWrites[0],
@@ -197,15 +197,73 @@ test('HTTP cleanup omits Secure and unsafe schemes or paths fail',
 
         for (const options of [
             { protocol: 'file:' },
-            { pathname: 'relative' },
-            { pathname: '/bad;path' },
-            { pathname: '/bad\tpath' }
+            { pathname: 'relative' }
         ]) {
             const harness = await initialized(options);
             assertFailure(harness);
             assert.equal(harness.cookieWrites.length, 0);
         }
     });
+
+
+test('cleanup retains every independently safe pathname candidate',
+    async () => {
+        const cases = [
+            {
+                pathname: '/account/orders;view=full',
+                paths: ['/', '/account', '/account/']
+            },
+            { pathname: '/a%3Bb', paths: ['/', '/a%3Bb'] },
+            { pathname: '/a;b', paths: ['/'] },
+            { pathname: '/\tunsafe', paths: ['/'] },
+            { pathname: '/\x7funsafe', paths: ['/'] },
+            { pathname: '/\u00e9', paths: ['/'] },
+            {
+                pathname: '/a/b/\u00e9',
+                paths: ['/', '/a', '/a/', '/a/b', '/a/b/']
+            },
+            { pathname: '/a;b/c', paths: ['/'] },
+            { pathname: '/a,b="c"\\d', paths: ['/', '/a,b="c"\\d'] },
+            {
+                pathname: '/a//b',
+                paths: ['/', '/a', '/a/', '/a//', '/a//b']
+            }
+        ];
+
+        for (const fixture of cases) {
+            const harness = await initialized({
+                pathname: fixture.pathname
+            });
+            const paths = harness.cookieWrites.map((write) =>
+                /; Path=([^;]+);/.exec(write)?.[1]);
+
+            assert.equal(harness.nodes['pow-status'].textContent,
+                'Checking your browser.');
+            assert.deepEqual(paths, fixture.paths);
+            for (const pathValue of paths) {
+                for (const byte of Buffer.from(pathValue, 'utf8')) {
+                    assert.equal(byte >= 0x21 && byte <= 0x7e
+                        && byte !== 0x3b, true);
+                }
+            }
+        }
+    });
+
+
+test('unsafe complete paths still clear safe stale ancestors', async () => {
+    const harness = await initialized({
+        pathname: '/account/orders;view=full',
+        cookies: [
+            { name: proofName, value: 'root', path: '/' },
+            { name: proofName, value: 'account', path: '/account' },
+            { name: proofName, value: 'slash', path: '/account/' }
+        ]
+    });
+
+    assert.equal(harness.document.cookie, '');
+    assert.equal(harness.nodes['pow-status'].textContent,
+        'Checking your browser.');
+});
 
 
 test('a proof cookie that survives cleanup fails closed', async () => {
@@ -222,6 +280,36 @@ test('a proof cookie that survives cleanup fails closed', async () => {
     assert.equal(harness.cookieWrites.length, 1);
     assert.equal(harness.document.cookie, `${proofName}=shadow`);
 });
+
+
+test('controller does not reconstruct path or query before reload',
+    async () => {
+        const clock = clockFixture();
+        const pathname = '/a//b;view=full';
+        const search = '?next=%2Ftarget&x=1';
+        const { harness } = await miningHarness(async () => {
+            clock.advance(1);
+            return Object.freeze({
+                found: true,
+                exhausted: false,
+                counter: 34,
+                nextCounter: null,
+                attempts: 1
+            });
+        }, { clock, pathname, search });
+        const before = {
+            pathname: harness.location.pathname,
+            search: harness.location.search
+        };
+
+        assert.deepEqual(before, { pathname, search });
+        await harness.runNextTimer();
+        assert.deepEqual({
+            pathname: harness.location.pathname,
+            search: harness.location.search
+        }, before);
+        assert.equal(harness.location.reloadCount, 1);
+    });
 
 
 test('primary KAT failure falls back once and full-digest mismatch is terminal',

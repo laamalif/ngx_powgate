@@ -375,25 +375,23 @@ function proofs(text) {
 	}
 	return values;
 }
+function safe(path) {
+	return !/[^\x21-\x7e]|;/.test(path);
+}
 function paths(pathname) {
 	if (typeof pathname !== 'string' || !pathname.startsWith('/')) {
 		throw new TypeError();
 	}
-	for (let i = 0; i < pathname.length; i++) {
-		const code = pathname.charCodeAt(i);
-		if (code <= 0x20 || code === 0x7f || code === 0x3b) {
-			throw new TypeError();
-		}
-	}
-	const paths = new Set(['/']);
+	const values = new Set(['/']);
+	const add = (path) => safe(path) && values.add(path);
 	for (let i = 1; i < pathname.length; i++) {
 		if (pathname[i] === '/') {
-			paths.add(pathname.slice(0, i));
-			paths.add(pathname.slice(0, i + 1));
+			add(pathname.slice(0, i));
+			add(pathname.slice(0, i + 1));
 		}
 	}
-	paths.add(pathname);
-	return paths;
+	add(pathname);
+	return values;
 }
 function clearProof() {
 	const protocol = location.protocol;
