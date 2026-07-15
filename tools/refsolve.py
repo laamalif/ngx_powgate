@@ -44,6 +44,16 @@ def decode_hex(value, name, length):
     return decoded
 
 
+def decode_cli_hex(value, name, length):
+    if not isinstance(value, str):
+        raise VectorError(f"{name} must be a string")
+    if len(value) != length * 2 or any(
+        character not in "0123456789abcdefABCDEF" for character in value
+    ):
+        raise VectorError(f"{name} must be exactly {length} hexadecimal bytes")
+    return bytes.fromhex(value)
+
+
 def b64url(value):
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
@@ -93,9 +103,10 @@ def proof_valid(digest, difficulty):
     return int.from_bytes(digest, "big") < 1 << (256 - difficulty)
 
 
-def mine_counter(nonce, difficulty):
+def mine_counter(nonce, difficulty, start_counter=0):
     require_int(difficulty, "difficulty", 1, 32)
-    for counter in range(COUNTER_MAX + 1):
+    require_int(start_counter, "start_counter", 0, COUNTER_MAX)
+    for counter in range(start_counter, COUNTER_MAX + 1):
         counter_ascii = str(counter).encode("ascii")
         digest = proof_digest(nonce, counter_ascii)
         if proof_valid(digest, difficulty):
@@ -179,21 +190,70 @@ def verify_vector(path):
 
 
 def mine_command(args):
-    secret = decode_hex(args.secret_hex, "secret_hex", SECRET_LEN)
+    secret = decode_cli_hex(args.secret_hex, "secret_hex", SECRET_LEN)
     plen = require_int(args.plen, "plen", 0, 128)
     bucket = require_int(args.bucket, "bucket", 0, 2**64 - 1)
     difficulty = require_int(args.difficulty, "difficulty", 1, 32)
+    start_counter = require_int(
+        args.start_counter, "start_counter", 0, COUNTER_MAX
+    )
     ip16 = mask_ip(canonical_ip(args.ip), plen)
     nonce = derive_nonce(secret, ip16, plen, bucket)
-    counter, counter_ascii, digest = mine_counter(nonce, difficulty)
+    counter, counter_ascii, digest = mine_counter(
+        nonce, difficulty, start_counter
+    )
     print(json.dumps({
         "masked_ip16_hex": ip16.hex(),
         "nonce_hex": nonce.hex(),
         "nonce_b64url": b64url(nonce),
         "counter": counter,
         "counter_ascii": counter_ascii.decode("ascii"),
+        "proof_cookie": f"1.{bucket}.{counter}",
         "proof_digest_hex": digest.hex()
     }, indent=2, sort_keys=True))
+
+
+def proof_check_command(args):
+    secret = decode_cli_hex(args.secret_hex, "secret_hex", SECRET_LEN)
+    plen = require_int(args.plen, "plen", 0, 128)
+    bucket = require_int(args.bucket, "bucket", 0, 2**64 - 1)
+    difficulty = require_int(args.difficulty, "difficulty", 1, 32)
+    counter = require_int(args.counter, "counter", 0, COUNTER_MAX)
+    ip16 = mask_ip(canonical_ip(args.ip), plen)
+    nonce = derive_nonce(secret, ip16, plen, bucket)
+    counter_ascii = str(counter).encode("ascii")
+    digest = proof_digest(nonce, counter_ascii)
+    print(json.dumps({
+        "counter": counter,
+        "counter_ascii": counter_ascii.decode("ascii"),
+        "proof_digest_hex": digest.hex(),
+        "valid": proof_valid(digest, difficulty)
+    }, indent=2, sort_keys=True))
+
+
+def auth_command(args):
+    secret = decode_cli_hex(args.secret_hex, "secret_hex", SECRET_LEN)
+    plen = require_int(args.plen, "plen", 32, 128)
+    expiry = require_int(args.expiry, "expiry", 0, 2**64 - 1)
+    difficulty = require_int(args.difficulty, "difficulty", 1, 32)
+    ip16 = mask_ip(canonical_ip(args.ip), plen)
+    payload, mac, cookie = auth_values(
+        secret, ip16, expiry, difficulty, plen
+    )
+    print(json.dumps({
+        "auth_cookie": cookie,
+        "auth_mac_hex": mac.hex(),
+        "auth_payload_hex": payload.hex(),
+        "masked_ip16_hex": ip16.hex()
+    }, indent=2, sort_keys=True))
+
+
+def add_proof_context(parser):
+    parser.add_argument("--secret-hex", required=True)
+    parser.add_argument("--ip", required=True)
+    parser.add_argument("--plen", required=True, type=int)
+    parser.add_argument("--bucket", required=True, type=int)
+    parser.add_argument("--difficulty", required=True, type=int)
 
 
 def parse_args():
@@ -204,11 +264,19 @@ def parse_args():
     verify.add_argument("path", type=Path)
 
     mine = subparsers.add_parser("mine")
-    mine.add_argument("--secret-hex", required=True)
-    mine.add_argument("--ip", required=True)
-    mine.add_argument("--plen", required=True, type=int)
-    mine.add_argument("--bucket", required=True, type=int)
-    mine.add_argument("--difficulty", required=True, type=int)
+    add_proof_context(mine)
+    mine.add_argument("--start-counter", type=int, default=0)
+
+    proof_check = subparsers.add_parser("proof-check")
+    add_proof_context(proof_check)
+    proof_check.add_argument("--counter", required=True, type=int)
+
+    auth = subparsers.add_parser("auth")
+    auth.add_argument("--secret-hex", required=True)
+    auth.add_argument("--ip", required=True)
+    auth.add_argument("--expiry", required=True, type=int)
+    auth.add_argument("--difficulty", required=True, type=int)
+    auth.add_argument("--plen", required=True, type=int)
 
     return parser.parse_args()
 
@@ -217,8 +285,12 @@ def main():
     args = parse_args()
     if args.command == "verify":
         verify_vector(args.path)
-    else:
+    elif args.command == "mine":
         mine_command(args)
+    elif args.command == "proof-check":
+        proof_check_command(args)
+    else:
+        auth_command(args)
     return 0
 
 

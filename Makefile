@@ -30,7 +30,8 @@ $(CHALLENGE_HEADER): html/challenge.html tools/build_pow_challenge.py
 challenge-page: $(CHALLENGE_HEADER)
 
 test-tools:
-	python3 -m unittest -v tests.tools.test_build_pow_challenge
+	python3 -m unittest -v tests.tools.test_build_pow_challenge \
+		tests.tools.test_refsolve
 
 $(BUILD_DIR)/tests/vector-v1.verified: tools/refsolve.py \
 		tests/vectors/v1.json
