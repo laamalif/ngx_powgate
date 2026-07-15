@@ -49,6 +49,57 @@ function fixedCrypto(byte, messages = []) {
 }
 
 
+function capturingCrypto(byte, records, gate = null) {
+    let active = 0;
+    let maximumActive = 0;
+
+    return {
+        get maximumActive() {
+            return maximumActive;
+        },
+        subtle: {
+            async digest(algorithm, view) {
+                assert.equal(algorithm, 'SHA-256');
+                active++;
+                try {
+                    maximumActive = Math.max(maximumActive, active);
+                    const record = {
+                        backing: view.buffer,
+                        byteLength: view.byteLength,
+                        byteOffset: view.byteOffset,
+                        bytes: Buffer.from(view),
+                        bytesAfterWait: null
+                    };
+                    records.push(record);
+                    if (gate != null) {
+                        await gate();
+                    }
+                    record.bytesAfterWait = Buffer.from(view);
+                    return new Uint8Array(32).fill(byte).buffer;
+                } finally {
+                    active--;
+                }
+            }
+        }
+    };
+}
+
+
+function recordingWebcrypto(records) {
+    return {
+        subtle: {
+            async digest(algorithm, view) {
+                records.push({
+                    byteLength: view.byteLength,
+                    bytes: Buffer.from(view)
+                });
+                return webcrypto.subtle.digest(algorithm, view);
+            }
+        }
+    };
+}
+
+
 function maxCounterNonce(valid) {
     const counter = Buffer.from(String(Number.MAX_SAFE_INTEGER), 'ascii');
 
@@ -400,6 +451,61 @@ test('subtle search is sequential, contiguous, and resumable', async () => {
 });
 
 
+test('both proof paths use canonical decimal boundaries', async () => {
+    const counters = [
+        0, 1, 9, 10, 99, 100,
+        999999999999999,
+        1000000000000000,
+        Number.MAX_SAFE_INTEGER
+    ];
+
+    for (const counter of counters) {
+        const records = [];
+        const nonce = new Uint8Array(32).fill(0x5a);
+        const solver = await loadSolver({
+            crypto: capturingCrypto(0xff, records)
+        });
+        await solver.solve(nonce, 32, counter, 1, 'subtle');
+        const expected = Buffer.concat([
+            Buffer.alloc(32, 0x5a),
+            Buffer.from(String(counter), 'ascii')
+        ]);
+
+        assert.equal(records.length, 1);
+        assert.equal(records[0].byteOffset, 0);
+        assert.equal(records[0].byteLength, expected.length);
+        assert.deepEqual(records[0].bytes, expected);
+
+        const js = await (await loadSolver()).solve(
+            nonce, 32, counter, 1, 'js');
+        const digest = expectedDigest(expected);
+        assert.equal(js.found, digest.readUInt32BE(0) === 0);
+    }
+});
+
+
+test('subtle encodes the final safe counter exactly once', async () => {
+    const maximum = Number.MAX_SAFE_INTEGER;
+
+    for (const valid of [true, false]) {
+        const records = [];
+        const nonce = maxCounterNonce(valid);
+        const solver = await loadSolver({
+            crypto: recordingWebcrypto(records)
+        });
+        const result = await solver.solve(nonce, 1, maximum, 4, 'subtle');
+
+        assert.equal(records.length, 1);
+        assert.equal(records[0].byteLength, 48);
+        assert.equal(records[0].bytes.subarray(32).toString('ascii'),
+            '9007199254740991');
+        assert.equal(result.found, valid);
+        assert.equal(result.exhausted, !valid);
+        assert.equal(result.attempts, 1);
+    }
+});
+
+
 test('solve snapshots the nonce before asynchronous search', async () => {
     const messages = [];
     let releaseFirst;
@@ -428,6 +534,52 @@ test('solve snapshots the nonce before asynchronous search', async () => {
     assert.equal(messages.length, 2);
     assert.deepEqual(messages[0].subarray(0, 32), Buffer.alloc(32));
     assert.deepEqual(messages[1].subarray(0, 32), Buffer.alloc(32));
+});
+
+
+test('subtle calls sharing a caller nonce own isolated snapshots', async () => {
+    let waiting = 0;
+    let release;
+    let allWaiting;
+    const released = new Promise((resolve) => {
+        release = resolve;
+    });
+    const reachedProvider = new Promise((resolve) => {
+        allWaiting = resolve;
+    });
+    const gate = async () => {
+        waiting++;
+        if (waiting === 2) {
+            allWaiting();
+        }
+        await released;
+    };
+    const records = [];
+    const nonce = new Uint8Array(32);
+    const solver = await loadSolver({
+        crypto: capturingCrypto(0xff, records, gate)
+    });
+    const first = solver.solve(nonce, 1, 0, 2, 'subtle');
+    const second = solver.solve(nonce, 1, 2, 2, 'subtle');
+
+    await reachedProvider;
+    nonce.fill(0xa5);
+    release();
+    await Promise.all([first, second]);
+
+    const byCounter = new Map(records.map((record) => [
+        record.bytes.subarray(32).toString('ascii'), record
+    ]));
+    assert.equal(records.length, 4);
+    assert.deepEqual([...byCounter.keys()].sort(), ['0', '1', '2', '3']);
+    for (const record of records) {
+        assert.deepEqual(record.bytes.subarray(0, 32), Buffer.alloc(32));
+        assert.deepEqual(record.bytesAfterWait, record.bytes);
+    }
+    assert.equal(byCounter.get('0').backing, byCounter.get('1').backing);
+    assert.equal(byCounter.get('2').backing, byCounter.get('3').backing);
+    assert.notEqual(byCounter.get('0').backing,
+        byCounter.get('2').backing);
 });
 
 
