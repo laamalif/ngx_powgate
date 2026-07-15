@@ -118,8 +118,9 @@ encodeCounter(counter, digits)
 
 `digits` is a caller-owned 16-byte `Uint8Array`. The encoder requires a safe
 nonnegative integer already admitted by `solve()` validation, writes canonical
-ASCII decimal from right to left, and returns the start offset and digit count
-without allocating a string or another array.
+ASCII decimal from right to left, and returns only the numeric start offset.
+The caller derives `digit_count` as `digits.length - start`; no result object,
+string, or array is allocated.
 
 The representation is exact:
 
