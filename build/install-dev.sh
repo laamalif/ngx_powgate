@@ -35,6 +35,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     clang \
+    chromium="${CHROMIUM_VERSION}" \
+    chromium-sandbox="${CHROMIUM_VERSION}" \
     cmake \
     cpanminus \
     curl \
@@ -88,5 +90,12 @@ printf '%s  %s\n' "$nginx_package_sha256" nginx.deb | sha256sum -c -
 DEBIAN_FRONTEND=noninteractive apt-get install -y ./nginx.deb
 
 cpanm --notest "Test::Nginx@${TEST_NGINX_VERSION}"
+
+mkdir -p /opt/ngx-powgate/browser
+cp /usr/local/share/ngx-powgate/browser/package.json \
+    /usr/local/share/ngx-powgate/browser/package-lock.json \
+    /opt/ngx-powgate/browser/
+npm ci --prefix /opt/ngx-powgate/browser --ignore-scripts --omit=dev \
+    --no-audit --no-fund
 
 rm -rf /tmp/nginx-download /tmp/nginx-gnupg /var/lib/apt/lists/*
