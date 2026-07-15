@@ -90,7 +90,7 @@ ngx_http_pow_handler(ngx_http_request_t *r)
 
     rc = ngx_http_pow_connection_kind(r, &kind);
     if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                       "pow_gate: unsupported connection address family %d, "
                       "request rejected",
                       r->connection->sockaddr->sa_family);
@@ -112,14 +112,14 @@ ngx_http_pow_handler(ngx_http_request_t *r)
     if (ngx_http_pow_client_identity(r, plcf, kind, ip16, &plen)
         != NGX_OK)
     {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                       "pow_gate: operation=client_identity verdict=failed");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
     now = ngx_time();
     if (now < 0) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                       "pow_gate: operation=time_bucket verdict=failed");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
@@ -132,7 +132,7 @@ ngx_http_pow_handler(ngx_http_request_t *r)
                                    challenge, sizeof(challenge),
                                    &challenge_text) != 1)
     {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                       "pow_gate: operation=challenge_format verdict=failed");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
