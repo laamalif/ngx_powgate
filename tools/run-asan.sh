@@ -24,6 +24,15 @@ ubsan='halt_on_error=1:print_stacktrace=1'
 ubsan_nginx="$ubsan:suppressions=$root/tools/ubsan-nginx.supp\
 :log_path=$work/sanitizer/ubsan"
 sanitizers='-fsanitize=address,undefined -fno-omit-frame-pointer'
+nginx_jobs=2
+
+case "$(uname -m)" in
+    amd64 | x86_64)
+        nginx_jobs=8
+    ;;
+esac
+
+echo "sanitizer nginx build jobs: $nginx_jobs"
 
 ASAN_OPTIONS="$asan_unit" \
 UBSAN_OPTIONS="$ubsan" \
@@ -46,7 +55,7 @@ CC=clang ./configure \
     --with-cc-opt="$sanitizers" \
     --with-ld-opt='-fsanitize=address,undefined' \
     --add-dynamic-module="$root"
-make -s -j2
+make -s -j"$nginx_jobs"
 
 test -x objs/nginx
 test -f objs/ngx_http_pow_module.so
