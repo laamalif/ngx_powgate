@@ -1,10 +1,9 @@
 # PowGate security and secret lifecycle
 
-Through Phase 4A, PowGate implements configuration validation, bounded secret
+Through Phase 4B, PowGate implements configuration validation, bounded secret
 loading, deterministic challenges, proof and auth-cookie verification,
-transactional cookie issuance, policy reloads, and dual-secret rotation. The
-challenge page still contains an inert script; Phase 4B supplies the browser
-solver.
+transactional cookie issuance, policy reloads, dual-secret rotation, and the
+self-contained browser solver.
 
 ## Request boundary
 
@@ -35,9 +34,17 @@ being mistaken for the next request on a persistent connection. With H1
 `Expect: 100-continue`, a client may close and reconnect after receiving the
 early final challenge; HTTP/2 cancellation remains stream-scoped.
 
-The server-side loop is complete, but the bundled browser script remains
-intentionally inert. Operators can exercise the protocol with the independent
-reference solver; ordinary browsers cannot yet solve it without Phase 4B.
+The challenge page contains one exact, build-hashed executable script and no
+external resources. Its private controller strictly parses the inserted
+parameters, self-tests a pure-JavaScript SHA-256 backend with one WebCrypto
+fallback, mines in bounded foreground slices, pauses while hidden, and writes
+the fixed proof cookie before reloading. Failures become a static retry UI;
+they do not expose exception details or enter reload loops.
+
+Node tests execute the exact production script and a real NGINX HTTPS smoke
+test verifies served-byte and CSP-hash identity. Phase 4C still owns the
+real-browser proof of CSP enforcement, native cookie behavior, reload, auth
+cookie issuance, and backend pass-through.
 
 ## Verification bounds and failure behavior
 

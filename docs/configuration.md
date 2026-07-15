@@ -1,8 +1,8 @@
 # PowGate configuration
 
 PowGate implements configuration, secret loading, runtime exemptions,
-deterministic challenge issuance, and server-side cookie/proof verification
-through Phase 4A. The browser solver arrives in Phase 4B.
+deterministic challenge issuance, server-side cookie/proof verification, and
+the self-contained browser solver through Phase 4B.
 
 ## Directives
 
@@ -173,9 +173,17 @@ empty `403`. Request bodies are discarded with NGINX's request-body API before
 either response is committed.
 
 The HTML response includes `Cache-Control: no-store`, `X-Robots-Tag: noindex`,
-and PowGate's versioned `Content-Security-Policy`. The executable script is an
-inert Phase 3 placeholder whose exact bytes are covered by the CSP hash. Phase
-4B replaces its body with the solver without changing the delivery pipeline.
+and PowGate's versioned `Content-Security-Policy`. Its single executable
+script is the self-contained Phase 4B solver. The build hashes its exact bytes
+for the CSP and NGINX inserts only the non-executable JSON parameters. The
+assembled response must remain smaller than 15 KiB.
+
+The solver mines in bounded foreground slices, pauses while the document is
+hidden, reports probability-based progress, writes the fixed `__pow_p` proof
+cookie, verifies the browser made exactly one such cookie visible, and then
+reloads. It performs no network requests and uses no storage, workers,
+tracking, or external resources. Phase 4C remains responsible for validation
+inside a real browser engine.
 
 PowGate always emits its own CSP. An operator `add_header` policy intersects
 with it in browsers. On a 503 response, NGINX adds that operator header only
@@ -185,7 +193,7 @@ Deploy the challenge endpoint over HTTPS. Test-only clients disable
 certificate verification solely for their ephemeral self-signed fixtures;
 the production module has no TLS-verification bypass.
 
-## Phase 4A example
+## Phase 4B example
 
 ```nginx
 load_module modules/ngx_http_pow_module.so;
@@ -217,7 +225,6 @@ http {
 }
 ```
 
-This configuration issues deterministic challenges, verifies independently
-submitted proofs and auth cookies, and passes valid requests to the backend.
-The bundled page remains an inert delivery-pipeline placeholder until the
-Phase 4B browser solver is implemented.
+This configuration issues deterministic challenges, serves the bundled
+browser solver, verifies submitted proofs and auth cookies, and passes valid
+requests to the backend.
