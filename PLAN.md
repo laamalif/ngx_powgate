@@ -384,12 +384,12 @@ Tasks:
    charset=utf-8`, and PowGate's named versioned CSP. Ranges, ETag, and
    Last-Modified are disabled. `HEAD` publishes the GET content length but no
    body; `error_page 503` cannot replace the completed response.
-7. `html/challenge.html` contains exactly one literal
+7. Phase 3's `html/challenge.html` contains exactly one literal
    `<!-- POW:PARAMS -->` marker and one inert executable script. The build
    tool rejects malformed templates, splits exact prefix/suffix bytes,
    extracts the exact script body, and emits its padded standard-base64
    SHA-256 digest into the same deterministic generated header. Phase 4B
-   replaces only the inert script body with the solver.
+   later replaces only the inert script body with the solver.
 8. Build responses transactionally: derive and validate values; allocate all
    buffers; reserve every header with `hash = 0`; populate metadata; enable
    headers only when complete; send; finalize exactly once; return
@@ -462,37 +462,50 @@ exposed has been resolved in `docs/protocol.md` first, code second.
 
 ## Phase 4B — The real challenge page
 
+**Status:** Complete (2026-07-15).
+
 **Goal:** a browser can solve what `refsolve` can solve.
 
 Tasks:
 
-1. Real challenge page (`html/challenge.html`, single file, no external
-   resources). Structure: one non-executable JSON params block (populated
-   by the server), one static executable `<script>` (hashed at build time
-   for the CSP header) that reads the params via
-   `JSON.parse(document.getElementById('pow-params').textContent)`.
-   Solver requirements:
-   - Solver yields on a **time budget, not a counter batch**: hash until
-     ~10 ms have elapsed, yield to the event loop, continue. Device
-     throughput varies by orders of magnitude; a hardcoded batch size is
-     wrong on both ends.
-   - Measure both solver backends once (in the Phase 4C harness):
-     per-call `crypto.subtle.digest` has real async overhead that can
-     dominate at 2^17 hashes; a compact pure-JS SHA-256 may be faster.
-     Keep whichever wins, keep the other as fallback, stay a single file
-     with no external WASM toolchain.
-   - Progress bar keyed to expected 2^d work.
-   - Counter as ASCII decimal appended to raw nonce bytes, per protocol.
-   - On success: `document.cookie = "__pow_p=1.<bucket>.<counter>; Path=/;
-     SameSite=Lax" (+ "; Secure" when on https)`, then `location.reload()`.
-   - `<noscript>` block stating JavaScript is required.
-   - Total page budget: < 15 KB, zero network fetches.
-2. Standalone JS unit test (node): the solver function reproduces the
-   canonical test vector exactly — same nonce in, same digest out, finds
-   the vector's counter at its difficulty.
+1. `html/challenge.html` is the only browser implementation: one accessible
+   `<main>`, one non-executable JSON parameter block at the literal marker,
+   and one build-hashed executable script. It has no external resource,
+   storage, worker, randomness, tracking, console, or unrelated browser-state
+   dependency. Generated prefix, suffix, and digest data remain build outputs.
+2. The exact script installs only a frozen `globalThis.PowGateSolver` with
+   synchronous pure-JavaScript `sha256` and an always-Promise bounded `solve`.
+   Both `js` and sequential `subtle` backends examine the same contiguous
+   safe-integer counter sequence and resolve the frozen five-field result:
+   `found`, `exhausted`, `counter`, `nextCounter`, and `attempts`. Success,
+   safe-integer exhaustion, and resumable attempt-limit outcomes are distinct;
+   no counter wraps or constructs `Number.MAX_SAFE_INTEGER + 1`.
+3. A private single-start controller strictly parses exactly `v`, `d`, `b`,
+   and `n`; validates canonical uint64 bucket text and canonical 32-byte
+   base64url nonce bytes; removes visible path-scoped `__pow_p` cookies; and
+   runs one production-shaped known-answer self-test. Pure JavaScript is the
+   fixed primary backend. WebCrypto is attempted once only after primary
+   initialization or self-test failure.
+4. Foreground mining uses adaptive bounded kernels inside approximately 10 ms
+   controller slices. Hidden documents schedule no work and resume at the
+   first untested counter. Progress is
+   `min(0.99, 1 - exp(-attempts / 2^difficulty))` until success. Terminal
+   failure is a static, non-diagnostic retry UI with no automatic reload.
+5. Success writes exactly
+   `__pow_p=1.<bucket>.<counter>; Path=/; SameSite=Lax`, appending `Secure`
+   only for HTTPS. Reload occurs only after exact-name read-back finds one
+   visible proof cookie. The controller never recursively restarts itself.
+6. NGINX checks the actual assembled prefix + JSON + suffix length before
+   response commitment; it must be strictly below 15 KiB. Node executes the
+   exact production script, verifies SHA-256 padding boundaries, both backend
+   contracts, canonical vectors, controller states, cookie behavior, and byte
+   identity from template through generator and CSP digest. The HTTPS smoke
+   executes the exact served bytes against NGINX 1.30.3. `node:vm` supplies a
+   deterministic harness, not a security boundary.
 
-**Gate:** JS unit test green against the canonical vector; page renders
-with no console errors.
+**Gate:** `make check` green with no skipped, TODO, placeholder, or test-only
+production behavior. Phase 4C retains real-browser CSP enforcement, native
+cookie/reload behavior, authenticated pass-through, and backend measurement.
 
 ---
 

@@ -11,7 +11,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 BUILDER = ROOT / "tools" / "build_pow_challenge.py"
 MARKER = b"<!-- POW:PARAMS -->"
-SCRIPT = b"/* PowGate placeholder script v1 */\nvoid 0;\n"
+SCRIPT = b"void 0;\n"
 VALID = (
     b"<!doctype html>\n"
     + MARKER
@@ -88,6 +88,35 @@ class BuildPowChallengeTests(unittest.TestCase):
         self.assertEqual(len(digest), 44)
         self.assertTrue(digest.endswith(b"="))
 
+    def test_emits_exact_checked_in_page_and_production_script_digest(self):
+        source = (ROOT / "html" / "challenge.html").read_bytes()
+        result, header = self.run_builder(source)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prefix = self.array_bytes(header, "ngx_http_pow_challenge_prefix")
+        suffix = self.array_bytes(header, "ngx_http_pow_challenge_suffix")
+        digest = self.array_bytes(
+            header, "ngx_http_pow_script_sha256_base64"
+        )
+        expected_prefix, expected_suffix = source.split(MARKER)
+        match = re.search(rb"<script>(.*?)</script>", source, re.DOTALL)
+
+        self.assertIsNotNone(match)
+        self.assertEqual(prefix, expected_prefix)
+        self.assertEqual(suffix, expected_suffix)
+        self.assertEqual(
+            digest,
+            base64.b64encode(hashlib.sha256(match.group(1)).digest()),
+        )
+
+    def test_accepts_structurally_valid_large_template(self):
+        source = VALID + b"x" * ((15 * 1024) - len(VALID))
+        result, header = self.run_builder(source)
+
+        self.assertEqual(len(source), 15 * 1024)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(header)
+
     def test_output_is_deterministic(self):
         first_result, first = self.run_builder(VALID)
         second_result, second = self.run_builder(VALID)
@@ -102,7 +131,6 @@ class BuildPowChallengeTests(unittest.TestCase):
             "bom": b"\xef\xbb\xbf" + VALID,
             "nul": VALID + b"\x00",
             "invalid utf8": VALID + b"\xff",
-            "15 kib": b"x" * (15 * 1024),
             "no marker": VALID.replace(MARKER, b""),
             "two markers": VALID.replace(MARKER, MARKER + MARKER),
             "marker after script": VALID.replace(MARKER, b"") + MARKER,

@@ -18,7 +18,7 @@ COVERAGE_LDFLAGS := --coverage
 .PHONY: check-policy check-test-env challenge-page module fault-modules \
 	test-tools test-unit \
 	test-vector-python test-fuzz test-fuzz-long test-coverage \
-	test-integration test-e2e asan check clean
+	test-integration test-js test-e2e asan check clean
 
 check-policy:
 	./tools/check-policy.sh
@@ -235,7 +235,10 @@ test-integration: check-test-env module fault-modules
 	TEST_NGINX_SERVROOT=/tmp/ngx-powgate-test \
 	prove -Itests/integration/lib -v tests/integration/*.t
 
-test-e2e: check-test-env module
+test-js:
+	node --test tests/e2e/solver.test.mjs tests/e2e/controller.test.mjs
+
+test-e2e: check-test-env module test-js
 	node tests/e2e/smoke.mjs
 
 asan: check-policy check-test-env

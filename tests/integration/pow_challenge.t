@@ -22,6 +22,7 @@ my $template;
 my $template_prefix;
 my $template_suffix;
 my $script_digest;
+my $page_max_body_len;
 
 
 {
@@ -40,6 +41,17 @@ my $script_digest;
     die "challenge template contract is invalid"
         if !defined $template_suffix || !defined $script;
     $script_digest = encode_base64(sha256($script), '');
+
+    open my $protocol_fh, '<:raw', 'src/pow_protocol.h'
+        or die "open protocol header: $!";
+    local $/;
+    my $protocol = <$protocol_fh>;
+    close $protocol_fh or die "close protocol header: $!";
+
+    ($page_max_body_len) = $protocol =~
+        /^#define POW_CHALLENGE_PAGE_MAX_BODY_LEN ([0-9]+)$/m;
+    die "challenge body limit is not a simple numeric define"
+        if !defined $page_max_body_len;
 }
 
 
@@ -88,6 +100,8 @@ sub assert_html_challenge {
     is_deeply $response->{headers}{'content-length'},
         [length($expected) . ''], "$name content length";
     is $response->{body}, $head ? '' : $expected, "$name exact body";
+    cmp_ok length($response->{body}), '<', $page_max_body_len,
+        "$name actual body is below protocol limit" if !$head;
 }
 
 

@@ -9,6 +9,13 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
+import {
+    createControllerHarness,
+    extractExecutableScript,
+    readChallengeScript,
+    readProtocolConstants
+} from './lib/challenge-script.mjs';
+
 
 const nginxBinary = process.env.NGX_BINARY ?? '/usr/sbin/nginx';
 const modulePath = process.env.POW_MODULE_PATH
@@ -169,7 +176,12 @@ http {
 
     const response = await waitForFrontend(frontendPort, agent);
     const body = await responseBody(response);
-    const script = body.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    const bodyBytes = Buffer.from(body, 'utf8');
+    const script = extractExecutableScript(bodyBytes);
+    const paramsText = body.match(
+        /<script type="application\/json" id="pow-params">(.*?)<\/script>/s
+    )?.[1];
+    const protocolConstants = await readProtocolConstants();
 
     assert.equal(response.statusCode, 503);
     assert.equal(response.httpVersion, '1.1');
@@ -180,8 +192,8 @@ http {
         /^v=1; d=20; b=(?:0|[1-9][0-9]*); n=[A-Za-z0-9_-]{43}$/);
     assert.equal(response.headers['cache-control'], 'no-store');
     assert.equal(response.headers['x-robots-tag'], 'noindex');
-    assert.equal(typeof script, 'string');
-    assert.equal(script, '/* PowGate placeholder script v1 */\nvoid 0;\n');
+    assert.equal(typeof paramsText, 'string');
+    assert.deepEqual(script, await readChallengeScript());
 
     const digest = createHash('sha256').update(script).digest('base64');
     assert.equal(response.headers['content-security-policy'],
@@ -190,7 +202,36 @@ http {
         + `${digest}'; style-src 'unsafe-inline'`);
     assert.equal(Number(response.headers['content-length']),
         Buffer.byteLength(body));
+    assert.ok(bodyBytes.length < protocolConstants.pageMaxBodyLen);
+    assert.equal(body.includes('00'.repeat(32)), false);
+    assert.equal('x-debug' in response.headers, false);
+    assert.equal('x-powgate-debug' in response.headers, false);
     assert.equal(backendRequests, 0);
+
+    const harness = await createControllerHarness({
+        paramsText,
+        pathname: '/',
+        protocol: 'https:',
+        script
+    });
+    const productionSolver = harness.context.PowGateSolver;
+    harness.context.PowGateSolver = Object.freeze({
+        sha256: productionSolver.sha256,
+        async solve() {
+            return Object.freeze({
+                found: true,
+                exhausted: false,
+                counter: 34,
+                nextCounter: null,
+                attempts: 1
+            });
+        }
+    });
+    await harness.runNextTimer();
+    await harness.runNextTimer();
+    assert.equal(harness.location.reloadCount, 1);
+    assert.equal(harness.document.cookie.startsWith(
+        `${protocolConstants.proofCookieName}=1.`), true);
 } finally {
     agent.destroy();
 

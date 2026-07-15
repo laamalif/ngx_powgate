@@ -119,7 +119,7 @@ make check-policy    # source-policy gate, introduced in Phase 0
 make module          # builds ngx_http_pow_module.so against pinned NGINX source
 make fault-modules   # builds test-only Set-Cookie faults under build/
 make test-integration# Test::Nginx suite against a real nginx binary
-make test-e2e        # node-based solver runs the real challenge JS end-to-end
+make test-e2e        # exact challenge JS plus the real NGINX HTTPS smoke
 
 # Introduced in Phase 1 with the real pure core; never placeholder targets.
 make test-unit       # pure-function unit tests (no NGINX needed)
@@ -206,6 +206,11 @@ the same commit that introduces any new rule.
     and commit headers only when the response is complete. A request has
     exactly one terminal outcome: `NGX_DECLINED`, an explicitly finalized
     `NGX_DONE`, or an NGINX error-response path. Never finalize twice.
+15. **The browser is an independent protocol consumer.** Execute the exact
+    checked-in production script in tests; never maintain a second solver
+    source or test-only browser implementation. Any v1 wire literal that must
+    appear in JavaScript is regression-checked against `src/pow_protocol.h`
+    or the immutable protocol vectors.
 
 ## Code conventions
 

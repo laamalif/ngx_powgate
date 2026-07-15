@@ -7,7 +7,7 @@ to complete a small browser-based proof-of-work challenge before reaching the
 upstream application. It runs inside NGINX with no external service, database,
 or challenge backend.
 
-## Planned v0.1 features
+## v0.1 features
 
 - Native NGINX dynamic module
 - Stateless challenge verification
@@ -19,7 +19,7 @@ or challenge backend.
 - HTTP/2-compatible protocol
 - Fuzz-tested parsers and ASan/UBSan-hardened builds
 
-## Planned flow
+## Flow
 
 1. A client requests a protected resource.
 2. ngx_powgate checks for a valid authentication cookie.
@@ -33,7 +33,7 @@ leaving normal visitors invisible after the first successful challenge.
 
 ## Implementation status
 
-Phase 4A is implemented. The module validates its complete configuration,
+Phase 4B is implemented. The module validates its complete configuration,
 loads bounded current and previous secrets, supports operator-driven secret
 rotation, applies IPv4/IPv6 and normalized-path exemptions, and issues
 deterministic challenges over HTTP/1.1 and HTTP/2.
@@ -45,9 +45,11 @@ current policy across reloads, falls back to one previous secret, issues both
 response cookies transactionally, and passes authenticated requests onward.
 These paths are tested against an independent Python reference solver.
 
-The page still contains an inert placeholder script. Phase 4B replaces it
-with the browser solver, so the current build proves the complete server-side
-loop but is not yet a browser-complete abuse gate.
+The generated page contains a self-contained, time-sliced browser solver with
+pure-JavaScript SHA-256 and a WebCrypto fallback. Exact production script
+bytes are exercised in Node and through a real NGINX HTTPS response. Phase 4C
+adds the real-browser CSP, cookie, reload, and authenticated pass-through
+matrix; Phase 4B does not claim that browser-engine coverage.
 
 ## Requirements
 
@@ -59,7 +61,7 @@ loop but is not yet a browser-complete abuse gate.
 
 ## Configuration
 
-Phase 4A provides the complete directive surface, inheritance, validation,
+Phase 4B provides the complete directive surface, inheritance, validation,
 secret loading, runtime exemptions, deterministic challenge issuance, and
 server-side cookie/proof verification.
 
@@ -124,7 +126,7 @@ See the [configuration reference](docs/configuration.md) and
 [security and secret lifecycle guide](docs/security.md) for the exact
 directive, file-policy, inheritance, and rotation contracts.
 
-## Planned v0.1 security model
+## v0.1 security model
 
 The completed v0.1 design provides:
 

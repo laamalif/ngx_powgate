@@ -293,6 +293,44 @@ test_challenge_serialize(void)
 
 
 static int
+test_challenge_body_len(void)
+{
+    static const struct {
+        size_t  prefix_len;
+        size_t  json_len;
+        size_t  suffix_len;
+        int     expected;
+        size_t  total;
+    } cases[] = {
+        { 1, 2, 3, 1, 6 },
+        { POW_CHALLENGE_PAGE_MAX_BODY_LEN - 1, 0, 0, 1,
+          POW_CHALLENGE_PAGE_MAX_BODY_LEN - 1 },
+        { POW_CHALLENGE_PAGE_MAX_BODY_LEN, 0, 0, 0, 0 },
+        { POW_CHALLENGE_PAGE_MAX_BODY_LEN - 1, 1, 0, 0, 0 },
+        { SIZE_MAX, 1, 0, 0, 0 },
+        { SIZE_MAX - 1, 1, 1, 0, 0 }
+    };
+    size_t  i;
+    size_t  total;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        total = SIZE_MAX;
+        TEST_ASSERT(pow_challenge_body_len(cases[i].prefix_len,
+                    cases[i].json_len, cases[i].suffix_len, &total)
+                    == cases[i].expected);
+
+        if (cases[i].expected != 0) {
+            TEST_ASSERT(total == cases[i].total);
+        }
+    }
+
+    TEST_ASSERT(pow_challenge_body_len(1, 2, 3, NULL) == 0);
+
+    return 0;
+}
+
+
+static int
 test_proof_parse_valid(void)
 {
     static const uint8_t  ordinary[] = "1.29333333.34";
@@ -370,6 +408,7 @@ main(void)
     TEST_ASSERT(test_bucket_skew() == 0);
     TEST_ASSERT(test_nonce_and_proof() == 0);
     TEST_ASSERT(test_challenge_serialize() == 0);
+    TEST_ASSERT(test_challenge_body_len() == 0);
     TEST_ASSERT(test_proof_parse_valid() == 0);
     TEST_ASSERT(test_proof_parse_reject() == 0);
 
