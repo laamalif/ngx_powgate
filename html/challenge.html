@@ -47,6 +47,7 @@ const initial = Object.freeze([
 	0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
 	0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
 ]);
+const max = Number.MAX_SAFE_INTEGER;
 function reset(state) {
 	for (let i = 0; i < 8; i++) {
 		state[i] = initial[i];
@@ -138,31 +139,22 @@ function sha256(bytes) {
 	}
 	return stateDigest(state);
 }
-function proofBytes(nonce, counter) {
-	const text = String(counter);
-	const input = new Uint8Array(nonce.length + text.length);
-	input.set(nonce);
-	for (let i = 0; i < text.length; i++) {
-		input[nonce.length + i] = text.charCodeAt(i);
-	}
-	return input;
-}
-function encodeCounter(counter, digits) {
-	let start = digits.length;
+function encodeCounter(counter, dec) {
+	let start = dec.length;
 	let value = counter;
 	do {
 		const q = Math.floor(value / 10);
-		digits[--start] = 0x30 + (value - q * 10);
+		dec[--start] = 0x30 + (value - q * 10);
 		value = q;
 	} while (value !== 0);
 	return start;
 }
-function proofDigest(counter, block, w, state, digits) {
+function proofDigest(counter, block, w, state, dec) {
 	block.fill(0, 32);
-	const start = encodeCounter(counter, digits);
-	const count = digits.length - start;
+	const start = encodeCounter(counter, dec);
+	const count = dec.length - start;
 	for (let i = 0; i < count; i++) {
-		block[32 + i] = digits[start + i];
+		block[32 + i] = dec[start + i];
 	}
 	block[32 + count] = 0x80;
 	const bitLen = (32 + count) * 8;
@@ -205,21 +197,28 @@ function validate(nonce, bits, start, limit,
 		throw new TypeError();
 	}
 }
+function provider() {
+	const value = globalThis.crypto == null ? null : globalThis.crypto.subtle;
+	if (value == null || typeof value.digest !== 'function') {
+		throw new Error();
+	}
+	return value;
+}
 function solveJs(nonce, bits, start, limit) {
 	const block = new Uint8Array(64);
 	const w = new Uint32Array(64);
 	const state = new Uint32Array(8);
-	const digits = new Uint8Array(16);
+	const dec = new Uint8Array(16);
 	let attempts = 0;
 	let counter = start;
 	block.set(nonce);
 	for (;;) {
-		proofDigest(counter, block, w, state, digits);
+		proofDigest(counter, block, w, state, dec);
 		attempts++;
 		if (meetsState(state, bits)) {
 			return result(true, false, counter, null, attempts);
 		}
-		if (counter === Number.MAX_SAFE_INTEGER) {
+		if (counter === max) {
 			return result(false, true, null, null, attempts);
 		}
 		counter++;
@@ -229,20 +228,17 @@ function solveJs(nonce, bits, start, limit) {
 	}
 }
 async function solveWeb(nonce, bits, start, limit) {
-	const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
-	if (subtle == null || typeof subtle.digest !== 'function') {
-		throw new Error();
-	}
+	const subtle = provider();
 	const input = new Uint8Array(48);
-	const digits = new Uint8Array(16);
+	const dec = new Uint8Array(16);
 	let attempts = 0;
 	let counter = start;
 	input.set(nonce);
 	for (;;) {
-		const at = encodeCounter(counter, digits);
-		const count = digits.length - at;
+		const at = encodeCounter(counter, dec);
+		const count = dec.length - at;
 		for (let i = 0; i < count; i++) {
-			input[32 + i] = digits[at + i];
+			input[32 + i] = dec[at + i];
 		}
 		const view = input.subarray(0, 32 + count);
 		const output = await subtle.digest('SHA-256', view);
@@ -254,7 +250,7 @@ async function solveWeb(nonce, bits, start, limit) {
 		if (meets(digest, bits)) {
 			return result(true, false, counter, null, attempts);
 		}
-		if (counter === Number.MAX_SAFE_INTEGER) {
+		if (counter === max) {
 			return result(false, true, null, null, attempts);
 		}
 		counter++;
@@ -413,29 +409,40 @@ function clearProof() {
 		throw new Error();
 	}
 }
-async function kat(backend, api) {
-	const input = proofBytes(hexBytes(katNonce), 34);
+async function kat(backend) {
+	const nonce = hexBytes(katNonce);
 	let digest;
 	if (backend === 'js') {
-		digest = api.sha256(input);
+		const block = new Uint8Array(64);
+		const w = new Uint32Array(64);
+		const hash = new Uint32Array(8);
+		const dec = new Uint8Array(16);
+		block.set(nonce);
+		proofDigest(34, block, w, hash, dec);
+		digest = stateDigest(hash);
 	} else {
-		const subtle = globalThis.crypto == null ? null : globalThis.crypto.subtle;
-		if (subtle == null || typeof subtle.digest !== 'function') {
-			throw new Error();
+		const subtle = provider();
+		const input = new Uint8Array(34);
+		const dec = new Uint8Array(16);
+		const at = encodeCounter(34, dec);
+		input.set(nonce);
+		for (let i = at; i < dec.length; i++) {
+			input[32 + i - at] = dec[i];
 		}
 		digest = new Uint8Array(await subtle.digest('SHA-256', input));
 	}
 	if (!equal(digest, hexBytes(katDigest))
-		|| !meets(digest, 8)) {
+		|| !meets(digest, 8) || !meets(digest, 10)
+		|| meets(digest, 11)) {
 		throw new Error();
 	}
 }
-async function select(api) {
+async function select() {
 	try {
-		await kat('js', api);
+		await kat('js');
 		return 'js';
 	} catch (_error) {
-		await kat('subtle', api);
+		await kat('subtle');
 		return 'subtle';
 	}
 }
@@ -500,7 +507,7 @@ async function mine() {
 				params.nonce, params.d, next, batch,
 				backend);
 			const elapsed = Math.max(performance.now() - before, 0.25);
-			attempts = Math.min(Number.MAX_SAFE_INTEGER,
+			attempts = Math.min(max,
 				attempts + result.attempts);
 			if (result.found) {
 				finish(result.counter);
@@ -550,7 +557,7 @@ async function startController() {
 		document.addEventListener('visibilitychange', visibilityChanged);
 		params = parse();
 		clearProof();
-		backend = await select(globalThis.PowGateSolver);
+		backend = await select();
 		status.textContent = 'Checking your browser.';
 		state = document.hidden ? 'paused' : 'mining';
 		queue();

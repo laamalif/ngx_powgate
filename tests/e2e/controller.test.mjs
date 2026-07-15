@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 import {
     createControllerHarness,
@@ -9,8 +13,13 @@ import {
 } from './lib/challenge-script.mjs';
 
 
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+    '../..');
 const protocolConstants = await readProtocolConstants();
 const proofName = protocolConstants.proofCookieName;
+const protocolVector = JSON.parse(await fs.readFile(
+    path.join(root, 'tests', 'vectors', 'v1.json'), 'utf8'));
+const katDigestHex = protocolVector.cases[0].proof_digest_hex;
 const validParams = JSON.stringify({
     v: protocolConstants.protocolVersion,
     d: 8,
@@ -52,6 +61,27 @@ function clockFixture() {
         performance: {
             now() {
                 return value;
+            }
+        }
+    };
+}
+
+
+function corruptSpecializedWorkspace(context) {
+    const Base = vm.runInContext('Uint8Array', context);
+    let block = null;
+
+    context.Uint8Array = class extends Base {
+        constructor(value, ...rest) {
+            super(value, ...rest);
+            if (typeof value === 'number' && value === 64) {
+                block = this;
+            } else if (typeof value === 'number' && value === 16
+                && block != null)
+            {
+                block.fill = () => {
+                    throw new Error('specialized workspace fault');
+                };
             }
         }
     };
@@ -194,43 +224,64 @@ test('a proof cookie that survives cleanup fails closed', async () => {
 });
 
 
-test('primary KAT failure falls back once and dual failure is terminal',
+test('primary KAT failure falls back once and full-digest mismatch is terminal',
     async () => {
+        const clock = clockFixture();
         const fallback = await createControllerHarness({
             crypto: webcrypto,
-            paramsText: validParams
+            paramsText: validParams,
+            performance: clock.performance
         });
+        corruptSpecializedWorkspace(fallback.context);
         const original = fallback.context.PowGateSolver;
+        const calls = [];
         fallback.context.PowGateSolver = Object.freeze({
-            sha256() {
-                return new Uint8Array(32).fill(0xff);
+            sha256: original.sha256,
+            async solve(...args) {
+                calls.push(args);
+                clock.advance(10);
+                return Object.freeze({
+                    found: false,
+                    exhausted: false,
+                    counter: null,
+                    nextCounter: args[2] + args[3],
+                    attempts: args[3]
+                });
             },
-            solve: original.solve
         });
         await fallback.runNextTimer();
-        assert.equal(fallback.nodes['pow-status'].textContent,
-            'Checking your browser.');
+        assert.equal(calls.length, 0);
+        assert.equal(fallback.nodes['pow-progress'].value, 0);
+        await fallback.runNextTimer();
+        assert.deepEqual(calls.map((args) => ({
+            backend: args[4],
+            startCounter: args[2]
+        })), [{ backend: 'subtle', startCounter: 0 }]);
 
-        const badCrypto = {
-            subtle: {
-                async digest() {
-                    return new Uint8Array(32).fill(0xff).buffer;
-                }
-            }
-        };
+        const wrongDigest = new Uint8Array(32);
+        wrongDigest[1] = 0x28;
+        assert.notEqual(Buffer.from(wrongDigest).toString('hex'),
+            katDigestHex);
         const failed = await createControllerHarness({
-            crypto: badCrypto,
+            crypto: {
+                subtle: {
+                    async digest() {
+                        return wrongDigest.slice().buffer;
+                    }
+                }
+            },
             paramsText: validParams
         });
-        const failedOriginal = failed.context.PowGateSolver;
-        failed.context.PowGateSolver = Object.freeze({
-            sha256() {
-                return new Uint8Array(32).fill(0xff);
-            },
-            solve: failedOriginal.solve
-        });
+        corruptSpecializedWorkspace(failed.context);
         await failed.runNextTimer();
         assertFailure(failed);
+        assert.equal(failed.timers.length, 0);
+        assert.equal(failed.location.reloadCount, 0);
+        assert.equal(failed.cookieWrites.some((write) =>
+            write.startsWith(`${proofName}=1.`)), false);
+        assert.equal(failed.cookieWrites.every((write) =>
+            write === `${proofName}=; Max-Age=0; Path=/; SameSite=Lax; Secure`),
+            true);
     });
 
 
