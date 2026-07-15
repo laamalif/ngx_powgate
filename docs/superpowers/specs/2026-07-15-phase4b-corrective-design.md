@@ -46,8 +46,9 @@ format, server verification rule, response header, or CSP policy. Therefore
 
 ### Phase 4B owns
 
-- one allocation-free-per-candidate proof digest path for the fixed v1 proof
-  message shape;
+- one pure-JavaScript proof digest path with no explicit typed-array or
+  message-object allocation per candidate for the fixed v1 proof message
+  shape;
 - caller-local workspace for each bounded JS `solve()` invocation;
 - exact counter encoding and single-block padding correctness;
 - the specialized full-digest runtime KAT;
@@ -141,17 +142,26 @@ nonce_raw(32) || counter_ascii(1..16)
 The message is 33 through 48 bytes. With the `0x80` byte and eight-byte bit
 length it always occupies exactly one SHA-256 block.
 
-Each bounded `solve(..., "js")` call allocates exactly one local workspace:
+Each bounded `solve(..., "js")` call creates one local workspace providing:
 
-- one 64-byte block;
-- one 64-word schedule;
-- one eight-word state/digest buffer;
-- one 16-byte decimal scratch buffer;
+- storage for one 64-byte block;
+- storage for one 64-word schedule;
+- storage for one eight-word state/digest buffer;
+- storage for one 16-byte decimal scratch buffer;
 - the existing defensive nonce copy made once at the public `solve()`
   boundary.
 
+The storage may be separate typed arrays or non-overlapping typed-array views
+over a larger invocation-local allocation. Its physical layout is not a
+public or permanent design contract.
+
 The workspace is lexical to that invocation and is not stored on the page,
 controller, namespace, backend, or another closure that outlives the call.
+
+The controller owns the immutable parsed challenge parameters and, for mining
+orchestration, only the selected backend, next counter, accumulated attempts,
+slice timing, and UI state. It never receives or stores the proof block,
+schedule, SHA state, decimal scratch, or digest workspace.
 
 The nonce is copied into block bytes 0 through 31 once. For each candidate:
 
@@ -179,10 +189,15 @@ There is no `String(counter)`, per-candidate message array, padded array,
 schedule, state array, digest array, or result object. The frozen result is
 created only once when a bounded `solve()` call terminates.
 
-The SubtleCrypto backend remains sequential and necessarily prepares one
-provider input view per candidate. It uses the shared decimal encoder but is
-otherwise unchanged; Phase 4B does not invent batching or parallel provider
-calls.
+The SubtleCrypto backend remains sequential and prepares one provider input
+view per candidate. It uses the shared decimal encoder and reuses one
+invocation-local 48-byte message buffer; it does not allocate a fresh backing
+message buffer per candidate. It must await each `subtle.digest()` before
+mutating that buffer for the next candidate. The `ArrayBufferView` passed to
+the provider has `byteOffset` and `byteLength` covering exactly
+`nonce_raw || counter_ascii`, or `32 + digit_count` bytes. Padding and unused
+scratch bytes are never included. Creating the exact-length view is permitted;
+batching and parallel provider calls are not.
 
 ## Specialized runtime KAT
 
@@ -205,15 +220,18 @@ The runtime does not redundantly compare the specialized digest with public
 `sha256()`. Both use the same compression primitive, and Node tests retain
 the independent general-hash and protocol-vector checks.
 
-Fallback tests alter only the controlled VM global after evaluating the exact
-production script and before controller startup. They replace `Uint32Array`
-with a test subclass that preserves normal construction except that a numeric
-length of 64 produces a 63-word array. The SHA-256 round constants have already
-been created, so this damages only the specialized JS schedule and causes its
-full-digest KAT to fail; the SubtleCrypto backend remains untouched. The
-dual-failure case additionally makes SubtleCrypto unavailable. No production
-fault flag, counter, directive, alternate KAT path, or modified script byte is
-introduced.
+Fallback tests corrupt only specialized-JS initialization in the controlled
+VM after evaluating the exact production script and before controller
+startup. The implementation plan selects the narrowest deterministic
+mechanism; it may substitute a schedule constructor that yields an invalid
+schedule shape. The SubtleCrypto backend remains untouched. The dual-failure
+case additionally makes SubtleCrypto unavailable. No production fault flag,
+counter, directive, alternate KAT path, or modified script byte is introduced.
+
+Backend selection finishes before mining state is committed. A primary
+initialization or KAT failure advances no counter, records no attempt, mutates
+no controller mining state, and retains no partial workspace. The validated
+fallback begins at the original start counter.
 
 ## Structural allocation contract
 
@@ -233,17 +251,17 @@ count allocations while preserving:
 - inherited static methods used by the script.
 
 The test records deltas around bounded JS calls with maximum attempts 1, 10,
-and 1000. The fixture uses difficulty 32 and an independently checked range
-with no early winner, and each result must report the requested number of
-attempts. Each call must record the same allocation-length multiset:
+and 1000. The fixture uses difficulty 32 and a range that Node's built-in
+`node:crypto` independently proves has no winner outside the instrumented
+production VM. Each result must report the requested number of attempts.
 
-- `Uint8Array`: the 32-byte defensive nonce copy, 64-byte block, and 16-byte
-  decimal scratch;
-- `Uint32Array`: the 64-word schedule and eight-word state.
-
-The order is not part of the contract. The positive, equal per-call deltas
-prove that the workspace belongs to each invocation rather than page-global
-storage.
+The accepted implementation records a stable, positive per-call allocation
+multiset documented by the implementation plan. The multiset must be equal
+across the three attempt counts. A later refactor may change that fixed
+per-call multiset only when attempt-count independence, invocation isolation,
+and the page budget remain proven. The enduring contract is no per-candidate
+typed-array allocation and no page-global hashing workspace, not one permanent
+storage layout.
 
 This test does not claim to count engine-internal number, Promise, or frozen
 result allocations.
@@ -348,6 +366,15 @@ Every row proves that nonce bytes are unchanged, digits immediately follow
 the nonce, and no NUL or unused scratch byte enters the provider input.
 Negative, fractional, and unsafe counters remain rejected before encoding.
 
+The safe-integer boundary has two independently prepared rows beginning at
+`Number.MAX_SAFE_INTEGER` with one permitted attempt:
+
+- a passing digest returns `found` at that exact counter;
+- a failing digest returns `exhausted`.
+
+In both rows the encoder receives `Number.MAX_SAFE_INTEGER` exactly once, and
+the solver never constructs or encodes a larger value.
+
 ### Hashing and solver behavior
 
 - all existing general SHA-256 known answers and padding boundaries;
@@ -357,22 +384,34 @@ Negative, fractional, and unsafe counters remain rejected before encoding.
 - exact five-field frozen results and safe-domain exhaustion;
 - constant typed-array allocation deltas for 1, 10, and 1000 attempts;
 - distinct-invocation JS and interleavable SubtleCrypto isolation cases;
+- after `solve()` is called, mutating the caller's original nonce does not
+  change either backend's result because the invocation-local snapshot is
+  authoritative;
+- two calls sharing the same caller nonce object produce the same results as
+  independent copies and cannot affect one another;
 - no page-global or controller-owned hashing workspace.
 
 ### Path and cookie behavior
 
-- `/account;view=full` reaches mining when no stale proof exists;
-- `/account/orders;view=full` clears `/`, `/account`, and `/account/` but
-  never serializes a semicolon candidate;
-- an unsafe byte immediately after `/` still performs root cleanup;
-- candidates containing control, DEL, whitespace, raw non-ASCII, or semicolon
-  never reach `document.cookie`;
+- browser-realistic `/account;view=full` reaches mining when no stale proof
+  exists;
+- browser-realistic `/account/orders;view=full` clears `/`, `/account`, and
+  `/account/` but never serializes a semicolon candidate;
+- `/a%3Bb` is serialized exactly as observed in `location.pathname`, while
+  the literal-semicolon candidate `/a;b` is skipped;
+- Node controller unit tests inject synthetic pathname strings to prove that
+  a control, DEL, whitespace, or raw non-ASCII code unit immediately after
+  `/` still leaves root cleanup active and never reaches `document.cookie`;
 - repeated slashes remain byte-for-byte unnormalized;
 - safe path behavior remains unchanged;
 - a visible undeletable exact-name proof after cleanup is terminal;
 - a blocked, mismatched, zero, or duplicate post-write occurrence is terminal;
 - exactly one matching post-write occurrence reloads once;
 - pathname and query remain unchanged across the reload action.
+
+Phase 4C real-browser integration repeats semicolon, percent-encoded,
+repeated-slash, pathname-preservation, and query-preservation cases. It does
+not expect a browser URL parser to expose synthetic raw control characters.
 
 ### Delivery and project gates
 
@@ -405,7 +444,8 @@ resource, weakened CSP, or larger body limit is permitted.
 - update `PLAN.md` to record the allocation-disciplined proof kernel, valid
   pathname behavior, and bounded Phase 4C benchmark handoff;
 - refine `docs/security.md` and `docs/configuration.md` to describe safe
-  best-effort path cleanup plus fail-visible remaining duplicates;
+  candidate-bounded cleanup and fail-closed handling of every visible
+  remaining proof occurrence;
 - update test/generator documentation only where commands or ownership
   statements change;
 - leave `docs/protocol.md` untouched.
