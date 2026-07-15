@@ -480,17 +480,26 @@ failure UI, retry, disconnect, incomplete navigation, or cleanup escalation.
 
 The positive matrix is eight genuine loops: two protocols times four cases.
 
-## 7. Parent-domain fail-closed matrix
+## 7. Unsafe-path fail-closed matrix
 
 Each protocol adds one fresh-context negative case. The browser API seeds a
-non-host-only Secure SameSite=Lax `__pow_p`, normalized to domain
-`powgate.test`, path `/`, and applicable to `gate.powgate.test`. Its v1 lexical
-form uses an out-of-window canonical bucket so it cannot accidentally verify.
+host-only Secure SameSite=Lax `__pow_p` for `gate.powgate.test`, scoped to the
+literal-semicolon path `/account;view=full`. The protected navigation is:
 
-Before controller cleanup, an observation records only that
-`document.cookie` contains one exact proof occurrence. It retains no cookie
-string. Browser metadata proves non-host-only domain scope regardless of
-whether Chromium displays a historical leading dot.
+```text
+/account;view=full/orders?mode=unsafe-stale
+```
+
+The cookie path genuinely matches that URL and the cookie is visible through
+`document.cookie`. PowGate refuses to copy the literal semicolon into a
+cookie-deletion `Path` attribute. The exact proof occurrence therefore remains
+visible after every safely serializable cleanup attempt and the controller
+fails closed before mining.
+
+Before controller cleanup, transient observations prove that browser storage
+contains the expected host-only path cookie, the initial request carries it,
+and `document.cookie` contains one exact proof occurrence. Retained results use
+only boolean/count verdicts and contain no cookie value.
 
 Only these negative pages install a pre-document observer. It intercepts the
 single `globalThis.PowGateSolver` assignment and creates a descriptor-compatible
@@ -503,19 +512,29 @@ count. Positive and benchmark pages are untouched.
 The expected terminal result is:
 
 - namespace assigned once and solver called zero times;
-- domain cookie unchanged and still page-visible;
-- no host-only proof or auth cookie;
+- original path-scoped cookie unchanged and still page-visible;
+- no root proof replacement and no auth cookie;
 - static failure UI and retry control visible;
 - no backend request, mining, reload, or second document request;
 - no console/error/CSP/crash event.
 
 After terminal UI appears, `FAIL_CLOSED_QUIET_WINDOW_MS` observes unchanged
 URL, zero new document request, zero cookie mutation, zero solver call, and no
-automatic retry action. The context then removes the expected domain cookie.
+automatic retry action. The context then removes the expected path cookie.
 
-The negative matrix is two cases, one per protocol. Phase 4B owns synthetic
-path/serialization cases; Phase 4C owns this browser-native undeletable-domain
-case.
+The negative matrix is two cases, one per protocol. The existing positive
+literal-semicolon case remains: a semicolon in the page URL does not itself
+prevent solving. The negative case separately proves that a visible stale
+cookie whose matching deletion path is not safely serializable causes a
+fail-closed terminal result.
+
+The rejected parent-domain case is not an acceptance case. In pinned Chromium,
+expiring the host-only root proof occurrence can remove a surviving
+parent-domain proof cookie from the page-visible `document.cookie` surface
+while leaving it in browser storage. Because the production controller decides
+from page-visible cookies, that state does not reach the fail-closed branch.
+Recording this finding prevents the unreachable assumption from being
+reintroduced later.
 
 ## 8. Benchmark methodology and responsiveness
 
@@ -752,6 +771,11 @@ tokens, safe process metadata, and a sanitized diagnostic path. It never emits
 cookie/proof/auth values, nonce/challenge JSON, secrets, query strings,
 unrestricted URLs, raw CDP, console payloads, or access logs.
 
+The unsafe-path negative cases report a `controller_assertion` failure when
+the visible stale proof is not preserved, the static terminal UI is not
+reached, or mining/reload/backend activity occurs. Retained diagnostics record
+only fixed verdicts and counts, never the seeded cookie value or request query.
+
 Only demonstrated NGINX bind collision is automatically retried. Browser
 launch, navigation, cases, benchmark repetitions, APIs, protocol,
 responsiveness, cleanup, and evidence are never retried into success.
@@ -838,8 +862,8 @@ object or full raw arrays under the canonical schema/name.
 `test-browser-e2e` executes the complete ten-case matrix twice:
 
 ```text
-normal production build: 8 positive + 2 negative
-ASan+UBSan build:         8 positive + 2 negative
+normal production build: 8 positive + 2 unsafe-path negative
+ASan+UBSan build:         8 positive + 2 unsafe-path negative
 total:                    20 browser cases
 ```
 
