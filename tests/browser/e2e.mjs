@@ -81,7 +81,6 @@ const POSITIVE_CASES = Object.freeze([
     ),
 ]);
 
-
 export function positiveCases() {
     return POSITIVE_CASES;
 }
@@ -220,6 +219,34 @@ function assertAuthCookie(cookie) {
 }
 
 
+async function assertChallengeResponse(response, body) {
+    assertHeaderAllowlist(response);
+    const headers = response.headers();
+    assert.equal(headers['cache-control'], 'no-store');
+    assert.equal(headers['content-type'], 'text/html; charset=utf-8');
+    assert.equal(headers['x-robots-tag'], 'noindex');
+    assert.equal('set-cookie' in headers, false);
+    assert.equal(Buffer.byteLength(body, 'utf8') < 15360, true);
+    const challenge = parseChallenge(headers['powgate-challenge']);
+    const params = parseParams(body);
+    assert.deepEqual(challenge, {
+        version: params.v,
+        difficulty: params.d,
+        bucket: params.b,
+        nonce: params.n,
+    });
+    assert.equal(params.d, 8);
+    const script = extractExecutableScript(Buffer.from(body, 'utf8'));
+    assert.deepEqual(script, await readChallengeScript());
+    const digest = createHash('sha256').update(script).digest('base64');
+    assert.equal(
+        headers['content-security-policy'],
+        `${EXPECTED_CSP_PREFIX}${digest}${EXPECTED_CSP_SUFFIX}`,
+    );
+    return Object.freeze({ challenge, params });
+}
+
+
 async function waitForDocumentCount(session, count) {
     return withDeadline(
         'browser_document_sequence', DEADLINES.e2e_terminal_outcome,
@@ -232,6 +259,63 @@ async function waitForDocumentCount(session, count) {
             }
         },
     );
+}
+
+
+async function enableDocumentBodyCapture(session) {
+    const bodies = [];
+    let failure = null;
+
+    const handler = (event) => {
+        Promise.resolve().then(async () => {
+            if (event.responseStatusCode === 503) {
+                const response = await session.cdp.send(
+                    'Fetch.getResponseBody', { requestId: event.requestId },
+                );
+                bodies.push(Object.freeze({
+                    body: Buffer.from(
+                        response.body,
+                        response.base64Encoded ? 'base64' : 'utf8',
+                    ).toString('utf8'),
+                    status: 503,
+                }));
+            }
+            await session.cdp.send('Fetch.continueRequest', {
+                requestId: event.requestId,
+            });
+        }).catch((error) => {
+            failure ??= error;
+        });
+    };
+
+    session.cdp.on('Fetch.requestPaused', handler);
+    await session.cdp.send('Fetch.enable', {
+        patterns: [{
+            requestStage: 'Response',
+            resourceType: 'Document',
+            urlPattern: '*',
+        }],
+    });
+
+    return Object.freeze({
+        take(status) {
+            if (failure !== null) {
+                throw failure;
+            }
+            const index = bodies.findIndex((entry) => entry.status === status);
+            if (index === -1) {
+                throw new Error('captured document body is unavailable');
+            }
+            return bodies.splice(index, 1)[0].body;
+        },
+        async close() {
+            session.cdp.off('Fetch.requestPaused', handler);
+            await session.cdp.send('Fetch.disable');
+            if (failure !== null) {
+                throw failure;
+            }
+        },
+    });
 }
 
 
@@ -318,6 +402,7 @@ export async function runPositiveCase(fixture, testCase) {
         protocolMode: fixture.protocolMode,
         observe: { allowChallengeStatusConsole: true },
     });
+    const bodyCapture = await enableDocumentBodyCapture(session);
     let primaryFailure;
 
     try {
@@ -357,7 +442,7 @@ export async function runPositiveCase(fixture, testCase) {
         currentOperation = `${fixture.protocolMode}_${testCase.id}_initial_status`;
         assert.equal(initialResponse.status(), 503);
         currentOperation = `${fixture.protocolMode}_${testCase.id}_initial_body`;
-        const initialBody = await initialResponse.text();
+        const initialBody = bodyCapture.take(503);
         currentOperation = `${fixture.protocolMode}_${testCase.id}_terminal_response`;
         const finalResponse = await finalResponsePromise;
         currentOperation = `${fixture.protocolMode}_${testCase.id}_document_sequence`;
@@ -389,30 +474,8 @@ export async function runPositiveCase(fixture, testCase) {
         );
 
         currentOperation = `${fixture.protocolMode}_${testCase.id}_challenge`;
-        assertHeaderAllowlist(initialResponse);
         assertHeaderAllowlist(finalResponse);
-        const initialHeaders = initialResponse.headers();
-        assert.equal(initialHeaders['cache-control'], 'no-store');
-        assert.equal(initialHeaders['content-type'], 'text/html; charset=utf-8');
-        assert.equal(initialHeaders['x-robots-tag'], 'noindex');
-        assert.equal('set-cookie' in initialHeaders, false);
-        assert.equal(Buffer.byteLength(initialBody, 'utf8') < 15360, true);
-        const challenge = parseChallenge(initialHeaders['powgate-challenge']);
-        const params = parseParams(initialBody);
-        assert.deepEqual(challenge, {
-            version: params.v,
-            difficulty: params.d,
-            bucket: params.b,
-            nonce: params.n,
-        });
-        assert.equal(params.d, 8);
-        const script = extractExecutableScript(Buffer.from(initialBody, 'utf8'));
-        assert.deepEqual(script, await readChallengeScript());
-        const digest = createHash('sha256').update(script).digest('base64');
-        assert.equal(
-            initialHeaders['content-security-policy'],
-            `${EXPECTED_CSP_PREFIX}${digest}${EXPECTED_CSP_SUFFIX}`,
-        );
+        await assertChallengeResponse(initialResponse, initialBody);
 
         currentOperation = `${fixture.protocolMode}_${testCase.id}_cookies`;
         const cookies = await session.context.cookies(url);
@@ -469,6 +532,7 @@ export async function runPositiveCase(fixture, testCase) {
         throw error;
     } finally {
         try {
+            await bodyCapture.close();
             await session.close();
         } catch (cleanupError) {
             if (primaryFailure === undefined) {
