@@ -209,15 +209,19 @@ sub _curl_transfer_arguments {
     my @arguments = (
         '--silent', '--show-error', '--insecure',
         '--max-time', '5', '--path-as-is',
-        '--retry', '20', '--retry-connrefused', '--retry-delay', '0',
         $protocol eq '1.1' ? '--http1.1' : '--http2',
-        '--request', $request->{method},
         '--dump-header', $header_path,
         '--output', $body_path,
         '--write-out',
         "POWGATE_META\t%{http_version}\t%{http_code}"
         . "\t%{num_connects}\t%{local_port}\n",
     );
+
+    if ($request->{method} eq 'HEAD') {
+        push @arguments, '--head';
+    } else {
+        push @arguments, '--request', $request->{method};
+    }
 
     if (defined $unix_socket) {
         push @arguments, '--unix-socket', $unix_socket;
@@ -350,6 +354,7 @@ sub https_sequence {
             push @responses, {
                 body_path => $body_path,
                 header_path => $header_path,
+                method => $request->{method},
             };
         }
 
@@ -375,7 +380,8 @@ sub https_sequence {
                 if $reported_status != $header_status;
 
             $responses[$index] = {
-                body => _read_file($responses[$index]{body_path}),
+                body => $responses[$index]{method} eq 'HEAD'
+                    ? '' : _read_file($responses[$index]{body_path}),
                 headers => $headers,
                 local_port => 0 + $metadata[$index * 4 + 3],
                 num_connects => 0 + $metadata[$index * 4 + 2],

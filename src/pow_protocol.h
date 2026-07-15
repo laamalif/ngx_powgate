@@ -36,7 +36,9 @@
     "frame-ancestors 'none'; script-src 'sha256-" \
     POW_CSP_HASH_MARKER "'; style-src 'unsafe-inline'"
 
-#define POW_HTML_CONTENT_TYPE           "text/html; charset=utf-8"
+#define POW_HTML_MEDIA_TYPE             "text/html"
+#define POW_HTML_MEDIA_TYPE_LEN         9
+#define POW_HTML_CONTENT_TYPE           POW_HTML_MEDIA_TYPE "; charset=utf-8"
 #define POW_CACHE_CONTROL_HEADER_NAME   "Cache-Control"
 #define POW_CACHE_CONTROL_HEADER_VALUE  "no-store"
 #define POW_ROBOTS_HEADER_NAME          "X-Robots-Tag"

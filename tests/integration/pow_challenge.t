@@ -1,15 +1,44 @@
 use strict;
 use warnings;
 
+use Digest::SHA qw(sha256);
+use MIME::Base64 qw(encode_base64);
 use Test::More;
 
-use PowGate::TestHTTPS qw(generate_tls_fixture https_request);
+use PowGate::TestHTTPS qw(
+    generate_tls_fixture
+    https_request
+    https_sequence
+);
 use PowGate::TestNginx qw(start_nginx stop_nginx write_file);
 
 
 my $secret = '00' x 32;
 my $runtime;
 my $error;
+my $template;
+my $template_prefix;
+my $template_suffix;
+my $script_digest;
+
+
+{
+    open my $template_fh, '<:raw', 'html/challenge.html'
+        or die "open challenge template: $!";
+    local $/;
+    $template = <$template_fh>;
+    close $template_fh or die "close challenge template: $!";
+
+    ($template_prefix, $template_suffix) = split(
+        /<!-- POW:PARAMS -->/,
+        $template,
+        -1,
+    );
+    my ($script) = $template =~ m{<script>(.*?)</script>}s;
+    die "challenge template contract is invalid"
+        if !defined $template_suffix || !defined $script;
+    $script_digest = encode_base64(sha256($script), '');
+}
 
 
 sub assert_bare_challenge {
@@ -25,6 +54,38 @@ sub assert_bare_challenge {
     like $values->[0],
         qr/\Av=1; d=20; b=(?:0|[1-9][0-9]{0,19}); n=[A-Za-z0-9_-]{43}\z/,
         "$name challenge grammar is canonical";
+}
+
+
+sub assert_html_challenge {
+    my ($response, $name, $head) = @_;
+    my $values = $response->{headers}{'powgate-challenge'};
+    my $challenge = ref($values) eq 'ARRAY' ? $values->[0] : '';
+    my ($difficulty, $bucket, $nonce) = $challenge =~
+        /\Av=1; d=(20); b=(0|[1-9][0-9]{0,19}); n=([A-Za-z0-9_-]{43})\z/;
+    my $json = '<script type="application/json" id="pow-params">'
+        . '{"v":1,"d":' . ($difficulty // '')
+        . ',"b":"' . ($bucket // '')
+        . '","n":"' . ($nonce // '') . '"}</script>';
+    my $expected = $template_prefix . $json . $template_suffix;
+    my $csp = "default-src 'none'; base-uri 'none'; form-action 'none'; "
+        . "frame-ancestors 'none'; script-src 'sha256-$script_digest'; "
+        . "style-src 'unsafe-inline'";
+
+    is $response->{status}, 503, "$name status";
+    is scalar(@{$values // []}), 1, "$name has one challenge header";
+    ok defined($difficulty), "$name challenge grammar is canonical";
+    is_deeply $response->{headers}{'content-type'},
+        ['text/html; charset=utf-8'], "$name content type";
+    is_deeply $response->{headers}{'cache-control'}, ['no-store'],
+        "$name cache control";
+    is_deeply $response->{headers}{'x-robots-tag'}, ['noindex'],
+        "$name robots policy";
+    is_deeply $response->{headers}{'content-security-policy'}, [$csp],
+        "$name CSP";
+    is_deeply $response->{headers}{'content-length'},
+        [length($expected) . ''], "$name content length";
+    is $response->{body}, $head ? '' : $expected, "$name exact body";
 }
 
 
@@ -180,6 +241,57 @@ NGINX
             ok length($ipv6->{body}) > 0, 'matching IPv6 CIDR body';
             ok !exists $ipv6->{headers}{'powgate-challenge'},
                 'matching IPv6 CIDR has no challenge header';
+        };
+
+        subtest "HTML challenge matrix over HTTPS $protocol" => sub {
+            my $responses = https_sequence(
+                $runtime,
+                protocol => $protocol,
+                host => '127.0.0.1',
+                requests => [
+                    { method => 'GET', path => '/navigation-pair' },
+                    { method => 'GET', path => '/navigation-pair',
+                      headers => [[Accept => 'text/html']] },
+                ],
+            );
+
+            is $responses->[0]{protocol}, $protocol,
+                "paired bare request negotiates $protocol";
+            assert_bare_challenge($responses->[0], 'paired bare request');
+            is $responses->[1]{protocol}, $protocol,
+                "HTML GET negotiates $protocol";
+            assert_html_challenge($responses->[1], 'HTML GET', 0);
+            is_deeply $responses->[1]{headers}{'powgate-challenge'},
+                $responses->[0]{headers}{'powgate-challenge'},
+                'bare and HTML fields agree in the same bucket';
+
+            my @cases = (
+                [ 'HTML HEAD',
+                  { method => 'HEAD', path => '/navigation-head',
+                    headers => [[Accept => 'text/html']] }, 1 ],
+                [ 'mixed-case HTML media type',
+                  { method => 'GET', path => '/navigation-case',
+                    headers => [[Accept => 'TeXt/HtMl']] }, 0 ],
+                [ 'later repeated Accept matches',
+                  { method => 'GET', path => '/navigation-repeated',
+                    headers => [
+                        [Accept => 'application/json'],
+                        [Accept => 'text/html'],
+                    ] }, 0 ],
+            );
+
+            for my $case (@cases) {
+                my $response = https_request(
+                    $runtime,
+                    protocol => $protocol,
+                    host => '127.0.0.1',
+                    %{$case->[1]},
+                );
+
+                is $response->{protocol}, $protocol,
+                    "$case->[0] negotiates $protocol";
+                assert_html_challenge($response, $case->[0], $case->[2]);
+            }
         };
     }
 };
