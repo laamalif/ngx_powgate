@@ -18,7 +18,9 @@ COVERAGE_LDFLAGS := --coverage
 .PHONY: check-policy check-test-env challenge-page module fault-modules \
 	test-tools test-unit \
 	test-vector-python test-fuzz test-fuzz-long test-coverage \
-	test-integration test-js test-e2e asan check clean
+	test-integration test-js test-e2e asan check clean \
+	test-browser-feasibility test-browser-e2e benchmark-browser \
+	check-browser-x86
 
 check-policy:
 	./tools/check-policy.sh
@@ -240,6 +242,27 @@ test-js:
 
 test-e2e: check-test-env module test-js
 	node tests/e2e/smoke.mjs
+
+test-browser-feasibility:
+	./tools/require-browser-x86.sh test-browser-feasibility
+	timeout --signal=TERM --kill-after=20s 160s \
+		node tests/browser/feasibility.mjs
+
+test-browser-e2e:
+	./tools/require-browser-x86.sh test-browser-e2e
+	$(MAKE) module
+	timeout --signal=TERM --kill-after=20s 580s node tests/browser/e2e.mjs
+
+benchmark-browser:
+	./tools/require-browser-x86.sh benchmark-browser
+	$(MAKE) challenge-page
+	timeout --signal=TERM --kill-after=20s 340s \
+		node tests/browser/benchmark.mjs
+
+check-browser-x86:
+	./tools/require-browser-x86.sh check-browser-x86
+	timeout --signal=TERM --kill-after=20s 1280s sh -eu -c \
+	  '$(MAKE) test-browser-feasibility && $(MAKE) test-browser-e2e && $(MAKE) benchmark-browser'
 
 asan: check-policy check-test-env
 	./tools/run-asan.sh
