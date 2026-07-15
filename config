@@ -6,7 +6,9 @@ ngx_module_srcs="$ngx_addon_dir/src/ngx_http_pow_module.c \
                  $ngx_addon_dir/src/pow_parse.c \
                  $ngx_addon_dir/src/pow_crypto.c \
                  $ngx_addon_dir/src/pow_challenge.c \
-                 $ngx_addon_dir/src/pow_cookie.c"
+                 $ngx_addon_dir/src/pow_cookie.c \
+                 $ngx_addon_dir/src/pow_cookie_scan.c \
+                 $ngx_addon_dir/src/ngx_http_pow_verify.c"
 ngx_module_libs="-lcrypto"
 
 . auto/module

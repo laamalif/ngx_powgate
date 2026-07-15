@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "pow_protocol.h"
+#include "pow_verify.h"
 
 
 typedef struct {
@@ -39,7 +40,8 @@ int pow_challenge_derive(const uint8_t secret[POW_SECRET_LEN],
 int pow_challenge_serialize(uint8_t difficulty, uint64_t bucket,
     const uint8_t nonce[POW_NONCE_LEN], uint8_t *buf, size_t buf_cap,
     pow_challenge_text_t *out);
-int pow_proof_check(const uint8_t nonce[POW_NONCE_LEN],
+pow_verify_result_t pow_proof_check(
+    const uint8_t nonce[POW_NONCE_LEN],
     const uint8_t *counter_ascii, size_t counter_len, uint8_t difficulty);
 int pow_proof_cookie_parse(const uint8_t *buf, size_t len,
     pow_proof_t *out);

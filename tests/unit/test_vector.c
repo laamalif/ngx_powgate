@@ -6,6 +6,7 @@
 #include "pow_cookie.h"
 #include "pow_crypto.h"
 #include "pow_protocol.h"
+#include "pow_verify.h"
 #include "test.h"
 #include "vector_v1.h"
 
@@ -46,7 +47,8 @@ main(void)
     TEST_ASSERT(bytes_equal(nonce, vector_v1_nonce, POW_NONCE_LEN) == 1);
     TEST_ASSERT(pow_proof_check(nonce, vector_v1_counter_ascii,
                                 vector_v1_counter_ascii_len,
-                                vector_v1_difficulty) == 1);
+                                vector_v1_difficulty)
+                == POW_VERIFY_VALID);
     for (i = 0; i < POW_NONCE_LEN; i++) {
         message[i] = nonce[i];
     }
@@ -72,7 +74,8 @@ main(void)
     TEST_ASSERT(pow_cookie_verify(vector_v1_secret, NULL, &parsed,
                                   vector_v1_ip16, vector_v1_expiry - 1,
                                   vector_v1_difficulty,
-                                  vector_v1_plen) == 1);
+                                  vector_v1_plen)
+                == POW_VERIFY_VALID);
 
     printf("test_vector: PASS\n");
 

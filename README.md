@@ -33,17 +33,21 @@ leaving normal visitors invisible after the first successful challenge.
 
 ## Implementation status
 
-Phase 3 is implemented. The module validates its complete configuration,
+Phase 4A is implemented. The module validates its complete configuration,
 loads bounded current and previous secrets, supports operator-driven secret
 rotation, applies IPv4/IPv6 and normalized-path exemptions, and issues
 deterministic challenges over HTTP/1.1 and HTTP/2.
 Browser navigations receive the exact generated HTML page and versioned CSP;
 other requests receive an empty challenge response.
 
-The page currently contains an inert placeholder script. Browser solving,
-proof verification, authentication-cookie issuance, and authenticated
-pass-through remain Phase 4 work. The current build demonstrates and hardens
-challenge delivery but is not yet a functional abuse gate.
+The server now verifies authentication cookies and submitted proofs, applies
+current policy across reloads, falls back to one previous secret, issues both
+response cookies transactionally, and passes authenticated requests onward.
+These paths are tested against an independent Python reference solver.
+
+The page still contains an inert placeholder script. Phase 4B replaces it
+with the browser solver, so the current build proves the complete server-side
+loop but is not yet a browser-complete abuse gate.
 
 ## Requirements
 
@@ -55,9 +59,9 @@ challenge delivery but is not yet a functional abuse gate.
 
 ## Configuration
 
-Phase 3 provides the complete directive surface, inheritance, validation,
-secret loading, runtime exemptions, and deterministic challenge issuance.
-Proof and cookie verification follow in Phase 4.
+Phase 4A provides the complete directive surface, inheritance, validation,
+secret loading, runtime exemptions, deterministic challenge issuance, and
+server-side cookie/proof verification.
 
 Load the module:
 

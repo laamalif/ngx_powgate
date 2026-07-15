@@ -220,8 +220,9 @@ Tasks:
      and non-canonical tail bits rejected; encode/decode round trips cover
      representative binary inputs including zero bytes and bytes 0–255.
 8. Fuzz harnesses in `tests/fuzz/` (libFuzzer + ASan/UBSan, clang):
-   - `fuzz_cookie.c` → `pow_cookie_parse` (+ verify with a fixed secret).
-   - `fuzz_proof.c` → `pow_proof_cookie_parse`.
+   - `fuzz_auth_cookie` → auth-cookie parse and verification.
+   - `fuzz_proof_cookie` → proof-cookie parse and verification.
+   - Phase 4A adds `fuzz_cookie_scan` for Cookie-field extraction.
    - Seed corpora: one valid input plus the malformed set from the
      implementation checklist §6. Harnesses allocate nothing proportional to
      fuzzer input. Every parser rule or bug fix adds a regression table row and
@@ -415,6 +416,8 @@ HTTP/1.1 and HTTP/2. ASan job green.
 
 ## Phase 4A — Server-side verification path
 
+**Status:** Complete (2026-07-15).
+
 **Goal:** the full server loop verified end-to-end using a *reference
 solver script* — no browser JS yet. This deliberately proves the C side
 against an independent implementation first.
@@ -423,51 +426,33 @@ Tasks:
 
 1. `tools/refsolve.py` (from Phase 1) drives all integration tests in this
    phase: proofs and cookies the C code did not produce, exercised against
-   the C code.
-2. Handler order (final):
-   Secrets come from `ngx_http_get_module_main_conf(r, ngx_http_pow_module)`;
-   location conf supplies every other policy value.
-   a. Parse `__pow` auth cookie if present (post-1.23 cookie API) →
-      `pow_cookie_parse` + `pow_cookie_verify` (dual secret, expiry,
-      difficulty floor vs current config, MAC over connection ip16) →
-      valid: `NGX_DECLINED`.
-   b. Else parse `__pow_p` proof cookie if present →
-      `pow_proof_cookie_parse` → verify claimed bucket using the protocol's
-      ordered-difference rule → re-derive nonce for (ip16, plen, claimed
-      bucket) with current secret, then previous on failure →
-      `pow_proof_check` →
-      valid: build auth cookie (`pow_cookie_build`, expiry = now + TTL),
-      push `Set-Cookie: __pow=…; Max-Age=…; Path=/; Secure; HttpOnly;
-      SameSite=Lax` **and** `Set-Cookie: __pow_p=; Max-Age=0; Path=/`,
-      then `NGX_DECLINED` — the original request proceeds immediately, no
-      redirect.
-   c. Else → Phase 3 challenge branches.
-   If allocation of either `Set-Cookie` header fails after proof validation,
-   return `NGX_HTTP_INTERNAL_SERVER_ERROR`; never pass the request through
-   cookieless. A test-only allocator-fault hook, compiled only in test builds,
-   forces each allocation site to fail independently and asserts 500; it has
-   no directive or production request path and is excluded from release
-   artifacts. A retry with the same proof remains valid within the accepted
-   bucket window.
-3. `Secure` attribute emitted per `pow_cookie_secure`, which is declared,
-   merged, and validated with the other Phase 2 directives; default on.
-4. Integration tests (proofs produced by `refsolve`): valid proof →
-   Set-Cookie + pass-through; tampered proof (wrong counter) → challenge
-   again; stale bucket (window + 2) → challenge; proof solved for IP A
-   submitted from IP B (two client addrs in test harness) → challenge;
-   auth cookie from IP A used from IP B at /32 binding → challenge, but
-   passes when `pow_bind_ipv4 24` and B is in A's /24; difficulty
-   raised in config → previously issued cookie rejected; binding
-   tightened in config (`pow_bind_ipv4 24` → `32`) → cookie bound at the
-   wider /24 mask rejected (plen floor); expired auth
-   cookie → challenge; secret rotation: cookie signed with old secret
-   still valid when old secret is line 2, invalid once removed; a proof mined
-   against a pre-rotation challenge verifies after rotation; duplicate
-   auth-cookie occurrences: garbage `__pow` before a valid one → passes
-   (occurrence iteration per protocol.md), four garbage occurrences
-   followed by a *valid* fifth → challenge (bound of 4 enforced; the
-   valid fifth is never tried); duplicates split across Cookie header lines
-   preserve request order, and only the first `__pow_p` occurrence is tried.
+   the C code. Mining always receives an explicit test difficulty.
+2. Implement the adapter layering and exact handler order frozen in
+   `docs/protocol.md` and the approved Phase 4A design: auth before proof;
+   first four exact auth occurrences; an independent first-proof scan; one
+   request clock sample; current verification policy; current/previous secret
+   bounds; and distinct client-invalid versus internal-error outcomes.
+   Secrets come from module main conf; location conf supplies all request
+   policy.
+3. Add the NGINX-free, allocation-free Cookie-field scanner and freeze the
+   three fuzz targets as `fuzz_cookie_scan`, `fuzz_auth_cookie`, and
+   `fuzz_proof_cookie`. Scanner tables and coverage execute every branch.
+4. After a valid proof, build the exact auth and proof-clear fields and commit
+   both transactionally. `pow_cookie_secure` controls only the auth field's
+   `Secure` attribute. Either reservation failure returns `500`, exposes no
+   PowGate Set-Cookie field, and never reaches protected content. The two
+   compile-time fault variants remain test-only and outside `out/`.
+5. Implement bounded verification summaries at effective `pow_log_level`:
+   at most one auth-invalid and one proof-invalid record per request, with
+   fixed operation/verdict tokens and no attacker-controlled bytes. Internal
+   failures always use a fixed `NGX_LOG_ERR` record and never contribute to
+   client-invalid summaries. These records use the cycle log so NGINX does
+   not append request-line context.
+6. Exercise the complete forced-HTTPS HTTP/1.1 and HTTP/2 matrix from the
+   approved Phase 4A design: success, malformed and policy-invalid artifacts,
+   clock window, IPv4/IPv6/RealIP binding, occurrence bounds and ordering,
+   current-policy reloads, worker-generation-proven secret rotation, logging,
+   response atomicity, body preservation, and both allocation-fault sites.
 
 **Gate:** `make check` green — the whole protocol works server-side with
 proofs the C code did not produce. Any spec ambiguity `refsolve`
@@ -545,13 +530,12 @@ Tasks:
 2. `docs/deployment-behind-proxies.md`: realip configuration, exact
    `set_real_ip_from` guidance, the two failure modes (shared LB IP vs
    spoofable XFF), and a copy-paste config for the common CDN cases.
-3. Logging per README: normal challenge issuance is not logged; verification
-   failures use the severity configured via `pow_log_level` (enum directive,
-   `limit_req_log_level` mechanism) with verdict + lengths only, config
-   errors via `ngx_conf_log_error`. Debug tracing through
-   `ngx_log_debug*(NGX_LOG_DEBUG_HTTP, ...)` so `--with-debug` builds show
-   the decision path. Grep-test: no log line ever contains a cookie value,
-   nonce, or secret.
+3. Audit and harden the Phase 4A logging contract: normal challenge issuance
+   remains silent; verification summaries retain their configured severity,
+   fixed tokens, bounded counts/lengths, and nondisclosure guarantees. Add
+   debug-only decision tracing where operationally useful and broaden the
+   permanent regression-policy review; Phase 5 does not introduce the first
+   runtime implementation of `pow_log_level`.
    `docs/configuration.md` documents normalized `pow_exempt_path` matching,
    duplicate-secret rejection, and the explicit secret-file policy; the
    security guide explains why descriptor-based checks permit symlinks but
@@ -735,6 +719,10 @@ config validation (it is a divisor).
 Time source is **wall-clock Unix time** (`ngx_time()`), never a monotonic
 clock — buckets must agree across worker restarts, reloads, and unrelated
 machines sharing a secret. Do not "improve" this later.
+For each enabled, supported, non-exempt request, the server samples `now`
+exactly once. Bucket calculation, bucket-window checks, auth-cookie expiry,
+issued expiry, and any fallback challenge generation for that request use
+that one value.
 Acceptance at verification time: `bucket ∈ {current, current−1, current+1}`
 (one bucket of clock skew in each direction; nothing else). The comparison is
 evaluated in uint64 using an ordered difference:
@@ -750,7 +738,11 @@ nonce = HMAC(secret_current,
 ```
 32 bytes. Sent to the client base64url-encoded (43 chars).
 Verification re-derives with the client's *connection* ip16/plen and the
-*claimed* bucket, trying current then previous secret.
+*claimed* bucket, trying the current secret first and the previous secret
+only when configured and the current-secret proof check is invalid. An
+internal derivation or proof-check error stops verification immediately; it
+never triggers previous-secret fallback. New challenges and auth cookies are
+always produced with the current secret.
 
 ## Client work
 
@@ -814,6 +806,32 @@ addresses after RealIP processing. Requests on any other address family are
 rejected with `500`; they are never treated as exempt and no synthetic
 address is used.
 
+## Cookie request-field extraction
+
+Cookie names are matched byte-for-byte and case-sensitively within
+semicolon-delimited segments. A segment begins at the field start or just
+after `;`; empty segments are permitted and ignored. The scanner skips only
+SP (`0x20`) and HTAB (`0x09`) before a pair, then requires the exact name
+immediately followed by `=`. Its value is every byte after `=` up to, but not
+including, the next `;` or field end. It performs no trimming, quoting,
+escaping, decoding, or NUL-terminated operation. Malformed and unrelated
+segments are skipped.
+
+Consequently, `__pow=` is an occurrence with an empty value, `__pow= abc`
+has a value beginning with SP, and `__pow =abc`, `__pow_extra=abc`, and
+`__POW=abc` are not `__pow` occurrences. Oversized, empty, and malformed
+exact-name values still count toward occurrence limits.
+
+All received Cookie fields are processed in request order and each field is
+scanned left-to-right. NGINX's HTTP/2 Cookie reconstruction preserves the
+effective receipt order used by the module. Auth extraction and proof
+extraction are independent: the first four exact configured auth-name
+occurrences are tried in order; auth success stops all scanning; otherwise a
+fresh scan selects only the first exact `__pow_p` occurrence. No later proof
+occurrence is evaluated, even if the first is oversized, malformed, or
+invalid. The auth-occurrence bound cannot prevent this independent proof
+scan.
+
 ## Proof submission — proof cookie `__pow_p`
 
 The solver sets a short-lived cookie and reloads. The challenge page is
@@ -838,10 +856,19 @@ iterating occurrences (unlike for `__pow`, where stale path-scoped
 cookies persist) buys nothing and adds attacker-controlled work.
 
 Server on seeing `__pow_p` (and no valid `__pow`): check the claimed bucket
-against the window above, then re-derive the nonce for (connection ip16,
-plen, claimed bucket) and check the proof with the current secret first and
-the previous secret on failure. This permits a proof mined immediately before
-a secret rotation to verify immediately after it.
+against the window above before any secret-dependent operation, then
+re-derive the nonce for (connection ip16, plen, claimed bucket) and check the
+proof with the current secret first. Only an invalid check falls back to the
+previous secret when configured. An internal error returns `500` without
+fallback. This permits a proof mined immediately before a secret rotation to
+verify immediately after it.
+
+Proof verification always uses the request's current effective difficulty
+and address-binding prefix. A proof satisfying the current difficulty is
+accepted regardless of the difficulty in effect when its challenge was
+issued. No previous difficulty, prefix, or other configuration history is
+considered; a reload may invalidate an in-flight proof.
+
 Valid → issue auth cookie + expire `__pow_p` (both `Set-Cookie` on the same
 response) and let the request through. Invalid → normal challenge flow.
 
@@ -872,8 +899,11 @@ mac     = HMAC(secret, "PGv1-cook" || payload || ip16(16))[0..15]    (16 bytes)
 - `ip16` is bound inside the MAC but **not stored** in the cookie; it is
   taken from the live connection at verification and masked with the
   cookie's `plen`.
-- Value cap: 256 bytes (well above the ~41 chars actual; cap is the parser
-  gate). Exactly 3 dot-separated fields; field 1 literal `1`; decoded
+- Value cap: 256 bytes (well above the exact 39-byte v1 value; cap is the
+  parser gate). Its fixed length is
+  `"1." + b64url(payload 10 bytes) + "." + b64url(mac 16 bytes)` =
+  `2 + 14 + 1 + 22` = 39 bytes. Exactly 3 dot-separated fields; field 1
+  literal `1`; decoded
   payload exactly 10 bytes; decoded mac exactly 16 bytes. Payload sanity
   bounds, checked at parse before any use: difficulty ∈ [1, 32],
   plen ∈ [32, 128]. plen especially: it masks the connection address
@@ -888,7 +918,10 @@ mac     = HMAC(secret, "PGv1-cook" || payload || ip16(16))[0..15]    (16 bytes)
 - `__pow` is the default name and is renameable per deployment with
   `pow_cookie_name`; the name is not a MAC input. The proof-cookie name
   `__pow_p` is fixed by this protocol: the solver sets it and it has no
-  configuration channel.
+  configuration channel. The exact name `__pow_p` is reserved and cannot be
+  configured as the auth-cookie name. Matching is case-sensitive; other
+  names remain subject to the normal cookie-token grammar and any explicitly
+  reserved protocol names.
 
 ## Auth cookie verification order
 
@@ -907,7 +940,8 @@ first `__pow_p` occurrence. Per occurrence:
    payload sanity bounds)
 2. MAC with the current secret; on failure, always calculate one second HMAC.
    Use the previous secret when configured; otherwise calculate and discard a
-   second HMAC with the current secret. Never calculate a third HMAC.
+   second HMAC with the current secret. A successful current-secret MAC does
+   not evaluate the previous secret. Never calculate a third HMAC.
 3. `expiry > now`
 4. `difficulty(cookie) >= difficulty(config)` — difficulty floor
 5. `plen(cookie) >= plen(config)` for the connection's address family —
@@ -915,6 +949,38 @@ first `__pow_p` occurrence. Per occurrence:
    `pow_bind_*` invalidates cookies bound at the old, wider mask, while a
    cookie bound tighter than the current config always passes
 6. Pass → `NGX_DECLINED`. All occurrences failing → treat as absent cookie.
+
+Configuration changes are not protocol events. Proofs use current policy,
+while auth cookies are self-describing and remain valid only while their
+signed difficulty and prefix satisfy the current policy floors.
+
+## Verification outcomes and cookie issuance
+
+A well-formed verification attempt that fails its MAC, proof-of-work, expiry,
+bucket, or current policy is client-invalid and follows the normal challenge
+flow. A cryptographic-provider failure, impossible arithmetic, invalid
+internal argument, allocation failure, or construction invariant failure is
+an internal error and returns `500`; it is never treated as client invalid.
+
+After a valid proof, issued expiry is the checked uint64 operation
+`expiry = now + pow_cookie_ttl`. Overflow returns `500`; wrapping and
+saturation are forbidden. Before NGINX serialization the module constructs
+exactly these two Set-Cookie fields, in this construction order:
+
+```
+Set-Cookie: <configured-name>=<39-byte-auth-value>; Max-Age=<ttl>; Path=/; Secure; HttpOnly; SameSite=Lax
+Set-Cookie: __pow_p=; Max-Age=0; Path=/
+```
+
+`pow_cookie_secure off` omits only `; Secure` from the auth field. `Max-Age`
+is canonical unsigned decimal seconds. Neither field contains `Domain` or
+`Expires`; the proof-clear path is always `/` and is not configurable. The
+construction order does not promise application-visible ordering after
+transport serialization.
+
+Both fields are committed transactionally. If arithmetic, construction,
+allocation, or reservation fails, no PowGate Set-Cookie field is visible,
+the protected content is not reached, and the request returns `500`.
 
 ## Version field
 

@@ -1,12 +1,12 @@
 # PowGate security and secret lifecycle
 
-Through Phase 3, PowGate implements configuration validation, bounded secret
-loading, reload lifecycle behavior, and deterministic challenge creation. It
-does not yet verify proofs or authentication cookies, issue authentication
-cookies, or allow a protected request through after proof-of-work; those
-request paths arrive in Phase 4.
+Through Phase 4A, PowGate implements configuration validation, bounded secret
+loading, deterministic challenges, proof and auth-cookie verification,
+transactional cookie issuance, policy reloads, and dual-secret rotation. The
+challenge page still contains an inert script; Phase 4B supplies the browser
+solver.
 
-## Phase 3 request boundary
+## Request boundary
 
 Challenge nonces are HMAC-SHA256 outputs derived from the current secret, the
 post-RealIP client address prefix, and the current time bucket. They are
@@ -35,10 +35,31 @@ being mistaken for the next request on a persistent connection. With H1
 `Expect: 100-continue`, a client may close and reconnect after receiving the
 early final challenge; HTTP/2 cancellation remains stream-scoped.
 
-Phase 3 is a delivery milestone, not complete abuse protection. The browser
-script is intentionally inert, and cookies and proof submissions are ignored.
-Do not describe an enabled Phase 3 deployment as a functioning proof-of-work
-gate until Phase 4 verification is implemented.
+The server-side loop is complete, but the bundled browser script remains
+intentionally inert. Operators can exercise the protocol with the independent
+reference solver; ordinary browsers cannot yet solve it without Phase 4B.
+
+## Verification bounds and failure behavior
+
+PowGate scans at most four exact auth-cookie occurrences and independently
+checks only the first exact proof-cookie occurrence. Each auth occurrence
+uses the current-secret MAC and, only after mismatch, one previous-secret or
+dummy-current MAC. A proof performs at most two nonce derivations and two
+proof checks. It retains no request, challenge, or configuration history.
+
+Client-invalid artifacts follow the normal challenge path. Provider,
+arithmetic, allocation, and invariant failures return `500`; they never
+downgrade to a challenge or pass-through. After a valid proof, both response
+cookies remain inert until construction and reservation succeed, then their
+header hashes are committed together. Fault-injected integration tests prove
+that failure at either reservation exposes no cookie and never reaches the
+backend.
+
+Verification summaries use the configured severity and contain fixed tokens,
+bounded counts, and lengths only. They are written without NGINX request-log
+context, so URI, headers, cookies, client IP, and request bodies are absent.
+Internal errors use fixed `NGX_LOG_ERR` records and never appear as client
+invalidity.
 
 ## Secret-file validation
 
@@ -88,12 +109,11 @@ configuration pools when a cycle is destroyed or its workers exit.
 
 ## Secret roles
 
-The first secret is current. It derives every new challenge nonce and, in a
-later request-processing phase, signs every new authentication cookie.
-The optional second secret is previous and is used only as a verification
-fallback. Both are loaded and validated in Phase 2. Current-secret nonce
-derivation is active in Phase 3. Cookie signing and cookie/proof verification,
-including previous-secret fallback, begin in Phase 4A.
+The first secret is current. It derives every new challenge nonce, verifies
+first, and signs every new authentication cookie. The optional second secret
+is previous and is used only as a verification fallback. A current-secret
+provider error stops verification; it never falls back as though the artifact
+were invalid.
 
 ## Rotation
 
@@ -128,6 +148,6 @@ file. If configuration testing or reload fails, the previous configuration
 cycle continues serving, so correct atomic replacement does not partially
 change the active secret pair.
 
-Phase 2 tests this file and reload lifecycle. Phase 4A tests that artifacts
-created before the first reload verify through the previous secret and stop
-verifying after the second secret is removed.
+Integration tests revalidate file permissions on reload, wait for all workers
+from the prior generation to retire, prove that pre-rotation artifacts verify
+through the previous secret, and prove that they fail after it is removed.

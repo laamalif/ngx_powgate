@@ -140,7 +140,7 @@ pow_cookie_parse(const uint8_t *buf, size_t len, pow_cookie_t *out)
 }
 
 
-int
+pow_verify_result_t
 pow_cookie_verify(const uint8_t secret[POW_SECRET_LEN],
     const uint8_t *previous_secret, const pow_cookie_t *parsed,
     const uint8_t ip16[POW_IP_LEN], uint64_t now, uint8_t min_difficulty,
@@ -163,7 +163,7 @@ pow_cookie_verify(const uint8_t secret[POW_SECRET_LEN],
         || parsed->plen < POW_IP_PLEN_MIN
         || parsed->plen > POW_IP_PLEN_MAX)
     {
-        return 0;
+        return POW_VERIFY_ERROR;
     }
 
     for (i = 0; i < POW_IP_LEN; i++) {
@@ -173,7 +173,7 @@ pow_cookie_verify(const uint8_t secret[POW_SECRET_LEN],
     if (pow_ip16_mask(ip_masked, parsed->plen) == 0
         || pow_cookie_mac(secret, parsed->payload, ip_masked, current_mac) == 0)
     {
-        return 0;
+        return POW_VERIFY_ERROR;
     }
 
     current_match = pow_ct_eq(current_mac, parsed->mac, POW_AUTH_MAC_LEN);
@@ -185,23 +185,23 @@ pow_cookie_verify(const uint8_t secret[POW_SECRET_LEN],
                            second_mac)
             == 0)
         {
-            return 0;
+            return POW_VERIFY_ERROR;
         }
 
         second_match = pow_ct_eq(second_mac, parsed->mac, POW_AUTH_MAC_LEN);
 
         if (previous_secret == NULL || second_match == 0) {
-            return 0;
+            return POW_VERIFY_INVALID;
         }
     }
 
     if (parsed->expiry <= now || parsed->difficulty < min_difficulty
         || parsed->plen < min_plen)
     {
-        return 0;
+        return POW_VERIFY_INVALID;
     }
 
-    return 1;
+    return POW_VERIFY_VALID;
 }
 
 

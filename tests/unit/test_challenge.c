@@ -4,6 +4,7 @@
 
 #include "pow_challenge.h"
 #include "pow_protocol.h"
+#include "pow_verify.h"
 #include "test.h"
 
 
@@ -189,12 +190,22 @@ test_nonce_and_proof(void)
     TEST_ASSERT(pow_challenge_derive(secret, ip, 56, UINT64_C(29333333),
                                      nonce) == 1);
     TEST_ASSERT(bytes_equal(nonce, expected, sizeof(nonce)) == 1);
-    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 8) == 1);
-    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 10) == 1);
-    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 11) == 0);
-    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 0) == 0);
-    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 33) == 0);
-    TEST_ASSERT(pow_proof_check(nonce, counter, 0, 8) == 0);
+    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 8)
+                == POW_VERIFY_VALID);
+    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 10)
+                == POW_VERIFY_VALID);
+    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 11)
+                == POW_VERIFY_INVALID);
+    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 0)
+                == POW_VERIFY_ERROR);
+    TEST_ASSERT(pow_proof_check(nonce, counter, sizeof(counter) - 1, 33)
+                == POW_VERIFY_ERROR);
+    TEST_ASSERT(pow_proof_check(nonce, counter, 0, 8)
+                == POW_VERIFY_ERROR);
+    TEST_ASSERT(pow_proof_check(NULL, counter, sizeof(counter) - 1, 8)
+                == POW_VERIFY_ERROR);
+    TEST_ASSERT(pow_proof_check(nonce, NULL, sizeof(counter) - 1, 8)
+                == POW_VERIFY_ERROR);
     TEST_ASSERT(pow_challenge_derive(secret, ip, 129, UINT64_C(1), nonce) == 0);
 
     return 0;

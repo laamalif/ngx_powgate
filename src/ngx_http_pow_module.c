@@ -4,6 +4,7 @@
 
 
 #include "ngx_http_pow_module.h"
+#include "ngx_http_pow_verify.h"
 #include "pow_challenge.h"
 #include "pow_challenge_page.h"
 
@@ -66,17 +67,19 @@ ngx_module_t  ngx_http_pow_module = {
 static ngx_int_t
 ngx_http_pow_handler(ngx_http_request_t *r)
 {
-    uint8_t                    challenge[POW_CHALLENGE_WIRE_MAX_LEN];
-    uint8_t                    ip16[POW_IP_LEN];
-    uint8_t                    nonce[POW_NONCE_LEN];
-    uint8_t                    plen;
-    time_t                     now;
-    uint64_t                   bucket;
-    ngx_int_t                  rc;
-    ngx_uint_t                 kind;
-    pow_challenge_text_t       challenge_text;
-    ngx_http_pow_loc_conf_t  *plcf;
-    ngx_http_pow_main_conf_t *pmcf;
+    uint8_t                       challenge[POW_CHALLENGE_WIRE_MAX_LEN];
+    uint8_t                       challenge_ip16[POW_IP_LEN];
+    uint8_t                       ip16[POW_IP_LEN];
+    uint8_t                       nonce[POW_NONCE_LEN];
+    uint8_t                       plen;
+    time_t                        now;
+    uint64_t                      bucket;
+    ngx_int_t                     rc;
+    ngx_uint_t                    kind;
+    pow_challenge_text_t          challenge_text;
+    ngx_http_pow_verify_result_t  verify_rc;
+    ngx_http_pow_loc_conf_t      *plcf;
+    ngx_http_pow_main_conf_t     *pmcf;
 
     if (r != r->main || r->internal) {
         return NGX_DECLINED;
@@ -127,7 +130,23 @@ ngx_http_pow_handler(ngx_http_request_t *r)
     bucket = (uint64_t) now / (uint64_t) plcf->challenge_window;
     pmcf = ngx_http_get_module_main_conf(r, ngx_http_pow_module);
 
-    if (pow_challenge_derive(pmcf->secret, ip16, plen, bucket, nonce) != 1
+    verify_rc = ngx_http_pow_verify_request(r, pmcf, plcf, ip16, plen,
+                                            (uint64_t) now);
+
+    if (verify_rc == NGX_HTTP_POW_VERIFY_OK) {
+        return NGX_DECLINED;
+    }
+
+    if (verify_rc == NGX_HTTP_POW_VERIFY_ERROR) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    ngx_memcpy(challenge_ip16, ip16, POW_IP_LEN);
+
+    if (pow_ip16_mask(challenge_ip16, plen) != 1
+        || pow_challenge_derive(pmcf->secret, challenge_ip16, plen, bucket,
+                                nonce)
+           != 1
         || pow_challenge_serialize((uint8_t) plcf->difficulty, bucket, nonce,
                                    challenge, sizeof(challenge),
                                    &challenge_text) != 1)
@@ -262,10 +281,6 @@ ngx_http_pow_client_identity(ngx_http_request_t *r,
         *plen = (uint8_t) plcf->bind_ipv6;
 
     } else {
-        return NGX_ERROR;
-    }
-
-    if (pow_ip16_mask(ip16, *plen) != 1) {
         return NGX_ERROR;
     }
 

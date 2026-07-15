@@ -90,6 +90,14 @@
 
 #define POW_AUTH_COOKIE_NAME            "__pow"
 #define POW_PROOF_COOKIE_NAME           "__pow_p"
+#define POW_COOKIE_NAME_SEPARATOR       '='
+#define POW_SET_COOKIE_HEADER_NAME      "Set-Cookie"
+#define POW_AUTH_MAX_AGE_PREFIX         "; Max-Age="
+#define POW_AUTH_SECURE_SUFFIX          \
+    "; Path=/; Secure; HttpOnly; SameSite=Lax"
+#define POW_AUTH_INSECURE_SUFFIX        "; Path=/; HttpOnly; SameSite=Lax"
+#define POW_PROOF_COOKIE_CLEAR_VALUE    \
+    POW_PROOF_COOKIE_NAME "=; Max-Age=0; Path=/"
 
 #define POW_CHALLENGE_WINDOW_DEFAULT    60
 #define POW_COOKIE_TTL_DEFAULT          3600

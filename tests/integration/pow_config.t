@@ -266,6 +266,7 @@ my @accepted_cookie_names = (
     [ 'one-byte cookie name', 'a' ],
     [ '64-byte cookie name', 'a' x 64 ],
     [ 'alphanumeric cookie name', 'PowGate20' ],
+    [ 'case variant of proof cookie name', '__POW_P' ],
     [ 'all RFC token punctuation', $token_punctuation ],
     [ 'dollar after first byte', 'a$' ],
 );
@@ -305,6 +306,13 @@ for my $row (@rejected_cookie_names) {
 }
 
 push @cases, (
+    {
+        name => 'reserved proof cookie name',
+        body => qq{    pow_cookie_name "__pow_p";\n},
+        succeeds => 0,
+        diagnostic =>
+            qr/pow_cookie_name "__pow_p" is reserved for the proof cookie/,
+    },
     {
         name => 'cookie name containing backslash separator',
         body => qq{    pow_cookie_name "pow\\\\gate";\n},

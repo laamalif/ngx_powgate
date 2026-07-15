@@ -22,6 +22,7 @@ our @EXPORT_OK = qw(
     signal_nginx
     start_nginx
     stop_nginx
+    wait_for_worker_generation
     wait_for_http
     write_file
 );
@@ -902,9 +903,82 @@ sub nginx_child_pids {
 
     close $fh or die "close $path: $!";
 
-    my @pids = $children =~ /(\d+)/g;
+    my @children = $children =~ /(\d+)/g;
+    my @pids;
+
+    for my $child (@children) {
+        my $command_path = "/proc/$child/cmdline";
+        my $command = '';
+        my $command_fh;
+
+        if (!open $command_fh, '<:raw', $command_path) {
+            next if $!{ENOENT};
+            die "open $command_path: $!";
+        }
+
+        while (length($command) < 256) {
+            my $chunk;
+            my $read = sysread $command_fh, $chunk,
+                256 - length($command);
+
+            if (!defined $read) {
+                next if $!{EINTR};
+                last;
+            }
+
+            last if $read == 0;
+            $command .= $chunk;
+        }
+
+        close $command_fh or die "close $command_path: $!";
+        push @pids, $child
+            if $command =~ /\Anginx: worker process(?:\x00|\s|\z)/;
+    }
 
     return \@pids;
+}
+
+
+sub wait_for_worker_generation {
+    my ($runtime, $old_pids, $seconds) = @_;
+    my %old;
+    my $deadline;
+
+    die "worker generation requires a nonempty prior PID array"
+        if ref($old_pids) ne 'ARRAY' || !@$old_pids;
+    die "worker generation deadline must be positive and below ten seconds"
+        if !defined($seconds) || $seconds <= 0 || $seconds >= 10;
+
+    %old = map { $_ => 1 } @$old_pids;
+    $deadline = clock_gettime(CLOCK_MONOTONIC) + $seconds;
+
+    while (clock_gettime(CLOCK_MONOTONIC) < $deadline) {
+        my $current = nginx_child_pids($runtime);
+        my $new_seen = grep { !$old{$_} } @$current;
+        my $old_alive = 0;
+
+        for my $pid (@$old_pids) {
+            if (kill 0, $pid) {
+                $old_alive = 1;
+                last;
+            }
+            if ($!{EPERM}) {
+                $old_alive = 1;
+                last;
+            }
+        }
+
+        return $current if $new_seen && !$old_alive;
+        sleep 0.05;
+    }
+
+    my $current = nginx_child_pids($runtime);
+    my @alive = grep { kill(0, $_) || $!{EPERM} } @$old_pids;
+
+    die "NGINX worker generation did not retire before deadline: "
+        . "old=[" . join(',', @$old_pids) . "] "
+        . "current=[" . join(',', @$current) . "] "
+        . "old_alive=[" . join(',', @alive) . "]";
 }
 
 

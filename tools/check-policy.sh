@@ -30,7 +30,7 @@ if [ -z "$all_files" ]; then
 fi
 
 pure_files=$(printf '%s\n' "$all_files" \
-    | grep -E '/(pow_crypto|pow_parse|pow_cookie|pow_challenge)[^/]*\.[ch]$')
+    | grep -E '/(pow_crypto|pow_parse|pow_cookie|pow_cookie_scan|pow_challenge|pow_verify)\.[ch]$')
 
 pure_headers=$(printf '%s\n' "$pure_files" | grep -E '\.h$')
 
@@ -65,7 +65,7 @@ hits=$(grep -En '(^|[^A-Za-z0-9_])(malloc|calloc|realloc|free)[[:space:]]*\(' \
     $all_files)
 [ -n "$hits" ] && violation "heap allocation; use ngx_pnalloc/ngx_pcalloc" "$hits"
 
-# 4. nginx headers in the four pure-core file families (hard rule 4); the
+# 4. nginx headers in the pure-core file families (hard rule 4); the
 #    pure core is NGINX-free by contract, C99 stdint/stddef types only
 if [ -n "$pure_files" ]; then
     hits=$(grep -En '#[[:space:]]*include[[:space:]]*[<"]ngx' $pure_files)
