@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    buildCombinedMatrixResult,
+    buildMatrixResult,
     buildNormalMatrixResult,
     partitionedNegativeCase,
     positiveCases,
@@ -99,5 +101,32 @@ test('normal matrix result requires eight positive and two negative cases', () =
     assert.throws(
         () => buildNormalMatrixResult(8, 1),
         /incomplete normal browser matrix/,
+    );
+});
+
+
+test('sanitized and combined results require the identical ten-case matrix', () => {
+    const normal = buildMatrixResult('normal', 8, 2);
+    const sanitized = buildMatrixResult('sanitized', 8, 2);
+
+    assert.deepEqual(sanitized, {
+        sanitizedPartitionedNegative: 2,
+        sanitizedPositive: 8,
+        sanitizedTotal: 10,
+        verdict: 'passed',
+    });
+    assert.deepEqual(buildCombinedMatrixResult(normal, sanitized), {
+        combinedTotal: 20,
+        normalPartitionedNegative: 2,
+        normalPositive: 8,
+        normalTotal: 10,
+        sanitizedPartitionedNegative: 2,
+        sanitizedPositive: 8,
+        sanitizedTotal: 10,
+        verdict: 'passed',
+    });
+    assert.throws(
+        () => buildMatrixResult('sanitized', 8, 1),
+        /incomplete sanitized browser matrix/,
     );
 });

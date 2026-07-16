@@ -26,6 +26,7 @@ import {
     isNginxBindCollision,
     readProcessIdentity,
     signalVerifiedProcess,
+    scrubChromiumEnvironment,
     validateChromiumProcessArguments,
     withDeadline,
     withFixture,
@@ -85,6 +86,32 @@ test('console classification admits only the exact expected 503 diagnostic', () 
         'Failed to load resource: arbitrary failure', options,
     ), 'unexpected');
     assert.equal(classifyConsoleMessage('visitor controlled', options), 'unexpected');
+});
+
+
+test('Chromium environment removes every sanitizer control variable', () => {
+    const environment = scrubChromiumEnvironment({
+        ASAN_OPTIONS: 'forbidden',
+        ASAN_SYMBOLIZER_PATH: '/tmp/forbidden',
+        LD_PRELOAD: '/tmp/forbidden.so',
+        LLVM_SYMBOLIZER_PATH: '/tmp/forbidden',
+        LSAN_OPTIONS: 'forbidden',
+        MSAN_OPTIONS: 'forbidden',
+        PATH: '/usr/bin',
+        UBSAN_OPTIONS: 'forbidden',
+        UBSAN_SYMBOLIZER_PATH: '/tmp/forbidden',
+    }, {
+        chromiumCache: '/tmp/cache',
+        chromiumConfig: '/tmp/config',
+        chromiumHome: '/tmp/home',
+    });
+
+    assert.deepEqual(environment, {
+        HOME: '/tmp/home',
+        PATH: '/usr/bin',
+        XDG_CACHE_HOME: '/tmp/cache',
+        XDG_CONFIG_HOME: '/tmp/config',
+    });
 });
 
 

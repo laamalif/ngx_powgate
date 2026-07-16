@@ -38,7 +38,7 @@ challenge-page: $(CHALLENGE_HEADER)
 
 test-tools:
 	python3 -m unittest -v tests.tools.test_build_pow_challenge \
-		tests.tools.test_refsolve
+		tests.tools.test_refsolve tests.tools.test_check_policy
 
 $(BUILD_DIR)/browser-tools/cookie-occurrences: \
 		tests/browser/cookie_occurrences.c src/pow_cookie_scan.c \
@@ -267,8 +267,11 @@ test-browser-partitioned-observer-equivalence: browser-tools module
 test-browser-e2e: test-browser-partitioned-observer-equivalence browser-tools
 	./tools/require-browser-x86.sh test-browser-e2e
 	$(MAKE) module
+	node --test tests/browser/sanitizer.test.mjs
+	./tools/prepare-browser-sanitized.sh build/browser-sanitized
 	timeout --signal=TERM --kill-after=20s 580s \
-		node tests/browser/e2e.mjs --server-build normal
+		node tests/browser/e2e.mjs --sanitizer-manifest \
+		build/browser-sanitized/manifest.json
 
 test-browser-partitioned-feasibility: browser-tools module
 	./tools/require-browser-x86.sh test-browser-partitioned-feasibility
@@ -294,4 +297,4 @@ check: check-policy test-tools test-unit test-coverage module test-integration \
 
 clean:
 	rm -rf $(BUILD_DIR)/coverage $(BUILD_DIR)/fuzz $(BUILD_DIR)/tests \
-		$(GENERATED_DIR) out
+		$(BUILD_DIR)/browser-sanitized $(GENERATED_DIR) out

@@ -26,6 +26,10 @@ import {
     partitionedObserverBootstrap,
     partitionedObserverSnapshot,
 } from './lib/partitioned-proof.mjs';
+import {
+    loadSanitizerManifest,
+    validateSanitizerManifest,
+} from './lib/sanitizer.mjs';
 
 const AUTH_COOKIE_NAME = 'PowAuth';
 const PROOF_COOKIE_NAME = '__pow_p';
@@ -107,13 +111,44 @@ export function partitionedNegativeCase() {
 
 
 export function buildNormalMatrixResult(positive, partitionedNegative) {
-    if (positive !== 8 || partitionedNegative !== 2) {
-        throw new Error('incomplete normal browser matrix');
+    return buildMatrixResult('normal', positive, partitionedNegative);
+}
+
+
+export function buildMatrixResult(serverBuild, positive, partitionedNegative) {
+    if ((serverBuild !== 'normal' && serverBuild !== 'sanitized')
+        || positive !== 8 || partitionedNegative !== 2) {
+        throw new Error(`incomplete ${serverBuild} browser matrix`);
+    }
+    const prefix = serverBuild === 'normal' ? 'normal' : 'sanitized';
+    return Object.freeze({
+        [`${prefix}PartitionedNegative`]: partitionedNegative,
+        [`${prefix}Positive`]: positive,
+        [`${prefix}Total`]: positive + partitionedNegative,
+        verdict: 'passed',
+    });
+}
+
+
+export function buildCombinedMatrixResult(normal, sanitized) {
+    if (normal?.normalPositive !== 8
+        || normal?.normalPartitionedNegative !== 2
+        || normal?.normalTotal !== 10 || normal?.verdict !== 'passed'
+        || sanitized?.sanitizedPositive !== 8
+        || sanitized?.sanitizedPartitionedNegative !== 2
+        || sanitized?.sanitizedTotal !== 10
+        || sanitized?.verdict !== 'passed') {
+        throw new Error('incomplete combined browser matrix');
     }
     return Object.freeze({
-        normalPartitionedNegative: partitionedNegative,
-        normalPositive: positive,
-        normalTotal: positive + partitionedNegative,
+        combinedTotal: normal.normalTotal + sanitized.sanitizedTotal,
+        normalPartitionedNegative: normal.normalPartitionedNegative,
+        normalPositive: normal.normalPositive,
+        normalTotal: normal.normalTotal,
+        sanitizedPartitionedNegative:
+            sanitized.sanitizedPartitionedNegative,
+        sanitizedPositive: sanitized.sanitizedPositive,
+        sanitizedTotal: sanitized.sanitizedTotal,
         verdict: 'passed',
     });
 }
@@ -827,9 +862,31 @@ export async function runPartitionedNegativeCase(fixture, testCase) {
 }
 
 
-export async function runE2EMatrix({ serverBuild = 'normal' } = {}) {
-    if (serverBuild !== 'normal') {
+export async function runE2EMatrix({
+    modulePath,
+    nginxBinary,
+    sanitizerManifest,
+    serverBuild = 'normal',
+} = {}) {
+    if (serverBuild !== 'normal' && serverBuild !== 'sanitized') {
         throw new TypeError('unsupported server build');
+    }
+    if (serverBuild === 'normal' && sanitizerManifest !== undefined) {
+        throw new TypeError('normal server cannot use sanitizer manifest');
+    }
+    if (serverBuild === 'sanitized') {
+        sanitizerManifest = await validateSanitizerManifest(
+            sanitizerManifest,
+        );
+        nginxBinary ??= sanitizerManifest.nginx.path;
+        modulePath ??= sanitizerManifest.module.path;
+        if (nginxBinary !== sanitizerManifest.nginx.path
+            || modulePath !== sanitizerManifest.module.path) {
+            throw new TypeError('sanitized server artifact mismatch');
+        }
+    } else {
+        nginxBinary ??= '/usr/sbin/nginx';
+        modulePath ??= path.resolve('out/ngx_http_pow_module.so');
     }
 
     let partitionedNegativePassed = 0;
@@ -840,9 +897,10 @@ export async function runE2EMatrix({ serverBuild = 'normal' } = {}) {
         await withFixture({
             target: `test-browser-e2e-${serverBuild}-${protocolMode}`,
             protocolMode,
-            nginxBinary: '/usr/sbin/nginx',
-            modulePath: path.resolve('out/ngx_http_pow_module.so'),
+            nginxBinary,
+            modulePath,
             renderNginxConfig: renderNginxConfiguration,
+            sanitizerManifest,
         }, async (fixture) => {
             const matrixFixture = Object.freeze({ ...fixture, protocolMode });
             for (const testCase of positiveCases()) {
@@ -856,23 +914,36 @@ export async function runE2EMatrix({ serverBuild = 'normal' } = {}) {
         });
     }
 
-    return buildNormalMatrixResult(
-        positivePassed, partitionedNegativePassed,
-    );
+    return buildMatrixResult(serverBuild, positivePassed,
+        partitionedNegativePassed);
 }
 
 
 async function main() {
     const arguments_ = process.argv.slice(2);
-    if (arguments_.length !== 2 || arguments_[0] !== '--server-build'
-        || arguments_[1] !== 'normal') {
-        throw new TypeError('usage: e2e.mjs --server-build normal');
+    if (arguments_.length !== 2
+        || arguments_[0] !== '--sanitizer-manifest') {
+        throw new TypeError(
+            'usage: e2e.mjs --sanitizer-manifest MANIFEST',
+        );
     }
-    const result = await runE2EMatrix({ serverBuild: arguments_[1] });
+    const manifest = await loadSanitizerManifest(path.resolve(arguments_[1]));
+    const normal = await runE2EMatrix({ serverBuild: 'normal' });
+    const sanitized = await runE2EMatrix({
+        sanitizerManifest: manifest,
+        serverBuild: 'sanitized',
+    });
+    const result = buildCombinedMatrixResult(normal, sanitized);
     process.stdout.write(
         `normal_positive=${result.normalPositive} `
         + `normal_partitioned_negative=${result.normalPartitionedNegative} `
-        + `normal_total=${result.normalTotal} verdict=${result.verdict}\n`,
+        + `normal_total=${result.normalTotal}\n`
+        + `sanitized_positive=${result.sanitizedPositive} `
+        + `sanitized_partitioned_negative=`
+        + `${result.sanitizedPartitionedNegative} `
+        + `sanitized_total=${result.sanitizedTotal}\n`
+        + `combined_total=${result.combinedTotal} `
+        + `verdict=${result.verdict}\n`,
     );
 }
 

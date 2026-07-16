@@ -11,6 +11,11 @@ import {
     DEADLINES,
     FAILURE_CATEGORIES,
 } from './constants.mjs';
+import {
+    buildSanitizedNginxEnvironment,
+    collectSanitizerReports,
+    validateSanitizerManifest,
+} from './sanitizer.mjs';
 
 
 const SAFE_TOKEN = /^[A-Za-z0-9_.-]+$/;
@@ -92,6 +97,17 @@ function classifySecondary(category, operation, error) {
 
 function delay(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+
+async function waitForChildClose(child, milliseconds) {
+    if (child === null || child.exitCode !== null || child.signalCode !== null) {
+        return;
+    }
+    await Promise.race([
+        new Promise((resolve) => child.once('close', resolve)),
+        delay(milliseconds),
+    ]);
 }
 
 
@@ -442,7 +458,7 @@ async function readProcessStatus(pid) {
 }
 
 
-function scrubChromiumEnvironment(environment, paths) {
+export function scrubChromiumEnvironment(environment, paths) {
     const scrubbed = { ...environment };
     for (const name of [
         'ASAN_OPTIONS',
@@ -819,7 +835,9 @@ class BrowserSession {
 class NginxFixtureRuntime {
     constructor(options) {
         if (options === null || typeof options !== 'object'
-            || typeof options.renderNginxConfig !== 'function') {
+            || typeof options.renderNginxConfig !== 'function'
+            || (options.sanitizerManifest !== undefined
+                && options.nginxEnvironment !== undefined)) {
             throw new TypeError('invalid fixture options');
         }
         this.options = options;
@@ -835,12 +853,33 @@ class NginxFixtureRuntime {
             workers: [],
             cleanupEscalated: false,
         };
+        this.nginxEnvironment = null;
+        this.sanitizer = null;
         this.diagnosticPath = null;
         this.browserSessions = new Set();
     }
 
     async start() {
         this.paths = await createRuntimePaths(this.options.target);
+        if (this.options.sanitizerManifest === undefined) {
+            this.nginxEnvironment = this.options.nginxEnvironment ?? process.env;
+        } else {
+            const manifest = await validateSanitizerManifest(
+                this.options.sanitizerManifest,
+            );
+            const reportDirectory = path.join(
+                this.paths.logs, 'sanitizer-reports',
+            );
+            this.nginxEnvironment = await buildSanitizedNginxEnvironment(
+                manifest, reportDirectory, process.env,
+            );
+            this.sanitizer = {
+                initialWorkers: [],
+                manifest,
+                reportDirectory,
+                workerGenerationCount: 0,
+            };
+        }
         await generateCertificate(this.paths);
         await writeStaticFiles(this.paths.content, this.options.staticFiles);
         const binary = this.options.nginxBinary ?? '/usr/sbin/nginx';
@@ -875,7 +914,7 @@ class NginxFixtureRuntime {
                 operation: 'nginx_config_test',
                 timeout: DEADLINES.nginx_config_test,
                 cwd: this.paths.root,
-                env: this.options.nginxEnvironment ?? process.env,
+                env: this.nginxEnvironment,
             });
             if (configTest.code !== 0) {
                 throw fixedFailure(
@@ -891,7 +930,7 @@ class NginxFixtureRuntime {
                 '-g', 'daemon off;',
             ], {
                 cwd: this.paths.root,
-                env: this.options.nginxEnvironment ?? process.env,
+                env: this.nginxEnvironment,
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
             this.child.stderr.on('data', (chunk) => {
@@ -916,6 +955,19 @@ class NginxFixtureRuntime {
                     );
                 }
                 this.nginx.workers = await descendantsOf(this.nginx.master);
+                if (this.sanitizer !== null) {
+                    this.sanitizer.initialWorkers = this.nginx.workers.filter(
+                        (worker) => worker.executable
+                            === this.nginx.master.executable,
+                    );
+                    if (this.sanitizer.initialWorkers.length < 1) {
+                        throw fixedFailure(
+                            'fixture_startup', 'sanitizer_workers',
+                            'instrumented NGINX worker was not observed',
+                        );
+                    }
+                    this.sanitizer.workerGenerationCount = 1;
+                }
                 return;
             } catch (error) {
                 await delay(25);
@@ -998,6 +1050,7 @@ class NginxFixtureRuntime {
 
     async cleanup() {
         let cleanupFailure;
+        let sanitizerMasterWasAlive = false;
         for (const session of [...this.browserSessions].reverse()) {
             try {
                 await session.close();
@@ -1012,6 +1065,11 @@ class NginxFixtureRuntime {
             this.reservations = null;
         }
         if (this.nginx.master !== null) {
+            if (this.sanitizer !== null) {
+                sanitizerMasterWasAlive = await identityStillMatches(
+                    this.nginx.master,
+                );
+            }
             if (!await identityStillMatches(this.nginx.master)) {
                 const refreshed = await refreshOwnedProcessIdentity(
                     this.nginx.master, this.paths.nginxPrefix,
@@ -1024,6 +1082,19 @@ class NginxFixtureRuntime {
         if (this.nginx.master !== null
             && await identityStillMatches(this.nginx.master)) {
             this.nginx.workers = await descendantsOf(this.nginx.master);
+            if (this.sanitizer !== null) {
+                const initial = this.sanitizer.initialWorkers.map((worker) =>
+                    `${worker.pid}:${worker.startTime}`).sort();
+                const current = this.nginx.workers.filter((worker) =>
+                    worker.executable === this.nginx.master.executable)
+                    .map((worker) => `${worker.pid}:${worker.startTime}`).sort();
+                if (!arraysEqual(initial, current)) {
+                    cleanupFailure ??= fixedFailure(
+                        'cleanup', 'sanitizer_workers',
+                        'instrumented NGINX worker generation changed',
+                    );
+                }
+            }
             await signalVerifiedProcess(this.nginx.master, 'SIGQUIT');
             if (!await waitUntilGone(
                 this.nginx.master, DEADLINES.nginx_quit,
@@ -1061,6 +1132,33 @@ class NginxFixtureRuntime {
                 'cleanup', 'process_identity',
                 'NGINX master identity could not be verified',
             );
+        }
+        if (this.sanitizer !== null) {
+            await waitForChildClose(this.child, 1000);
+            const workersExited = (await Promise.all(
+                this.sanitizer.initialWorkers.map((worker) =>
+                    identityStillMatches(worker)),
+            )).every((alive) => !alive);
+            const masterExited = this.nginx.master !== null
+                && !await identityStillMatches(this.nginx.master);
+            try {
+                await collectSanitizerReports({
+                    cleanupEscalated: this.nginx.cleanupEscalated,
+                    masterExitedCleanly: sanitizerMasterWasAlive
+                        && masterExited && this.child?.exitCode === 0
+                        && this.child?.signalCode === null,
+                    reportDirectory: this.sanitizer.reportDirectory,
+                    stderr: this.stderr,
+                    workerGenerationCount:
+                        this.sanitizer.workerGenerationCount,
+                    workersExited,
+                });
+            } catch (error) {
+                cleanupFailure ??= fixedFailure(
+                    'cleanup', 'sanitizer_reports',
+                    'sanitized NGINX execution failed', { cause: error },
+                );
+            }
         }
         if (this.paths !== null) {
             await fs.rm(this.paths.root, { recursive: true, force: true });

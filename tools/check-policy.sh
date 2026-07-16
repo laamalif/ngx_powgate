@@ -80,6 +80,23 @@ if [ "$actual_ubsan_suppressions" != "$allowed_ubsan_suppressions" ]; then
         "$actual_ubsan_suppressions"
 fi
 
+# Sanitizer coverage of project code may not be disabled. Reviewed upstream
+# NGINX exceptions live only in the exact suppression allowlist above.
+hits=$(grep -En 'no_sanitize' $all_files)
+[ -n "$hits" ] && violation "alignment sanitizer exclusion in project code" "$hits"
+
+build_control_files=$(find tools -type f \
+    \( -name '*.sh' -o -name '*.py' -o -name '*.mjs' -o -name '*.supp' \) \
+    ! -name check-policy.sh -print)
+hits=$(grep -En -- '-fno-sanitize=alignment' Makefile Containerfile \
+    $build_control_files 2>/dev/null)
+[ -n "$hits" ] && violation "alignment sanitizer disabled by build flags" "$hits"
+
+test_artifacts=$(find out -type f \
+    \( -name '*fault*' -o -name '*negative*' \) -print 2>/dev/null)
+[ -n "$test_artifacts" ] \
+    && violation "test artifact under out" "$test_artifacts"
+
 # 1. banned libc string/format functions on request data (hard rules 1+2);
 #    the ngx_-prefixed wrappers are the sanctioned forms and do not match
 #    because the preceding character class excludes '_'
