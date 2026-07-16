@@ -50,9 +50,13 @@ proof-cookie path, always including `/`, and fails closed if any exact
 `__pow_p` occurrence remains visible.
 
 Node tests execute the exact production script and a real NGINX HTTPS smoke
-test verifies served-byte and CSP-hash identity. Phase 4C still owns the
-real-browser proof of CSP enforcement, native cookie behavior, reload, auth
-cookie issuance, and backend pass-through.
+test verifies served-byte and CSP-hash identity. The Phase 4C native x86_64
+Chromium matrix additionally proves CSP enforcement, native cookie behavior,
+reload, auth-cookie issuance, and backend pass-through over explicitly
+asserted HTTP/1.1 and HTTP/2. It also proves that a naturally created,
+page-visible partitioned proof cookie which survives cleanup reaches the
+static fail-closed state before mining. This is one pinned browser environment,
+not a claim of broad browser, device, or architecture compatibility.
 
 ## Verification bounds and failure behavior
 

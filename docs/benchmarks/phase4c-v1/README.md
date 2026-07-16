@@ -2,8 +2,8 @@
 
 This directory owns the immutable schema and, after final Phase 4C review,
 one manually promoted canonical result from the pinned native x86_64 Chromium
-environment. Task 9 adds validation and promotion tooling only; it does not
-generate or commit benchmark evidence.
+environment. The benchmark implementation generates only ignored development
+results until the clean final-source release sequence explicitly promotes one.
 
 Generated development results belong at:
 
@@ -11,8 +11,9 @@ Generated development results belong at:
 build/benchmark-browser-result.json
 ```
 
-That file remains ignored. `make benchmark-browser` will create it only after
-Task 10 implements the browser measurement. It never updates this directory.
+That file remains ignored. `make benchmark-browser` creates or replaces it,
+validates its schema and relational invariants, and never updates this
+directory.
 
 Canonical evidence is promoted explicitly with:
 
@@ -35,7 +36,9 @@ The mechanical decision remains:
   JavaScript median, and it wins at least five of seven matched pairs.
 - Throughput is evidence, not an acceptance threshold.
 
-The selected order, tested source commit, exact reproduction command, and
-canonical environment will be recorded here only when the final evidence-only
-commit is promoted. Historical v1 evidence and this schema are not rewritten;
-an incompatible future format requires a new versioned directory.
+The exploratory Task 10 result retained JavaScript as primary because the
+mechanical threshold was not met. That result is not canonical and is never
+promoted. The selected order, final tested source commit, exact reproduction
+command, and canonical environment will be recorded here only with the later
+evidence-only commit. Historical v1 evidence and this schema are not
+rewritten; an incompatible future format requires a new versioned directory.

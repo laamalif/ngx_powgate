@@ -16,6 +16,9 @@ import {
 import {
     promotePhase4CEvidence,
 } from '../../tools/promote-phase4c-evidence.mjs';
+import {
+    checkCommittedPhase4CEvidence,
+} from '../../tools/check-phase4c-evidence.mjs';
 
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -521,6 +524,77 @@ test('promotion rejects non-promotable, dirty, HEAD, lock, and hash mismatch',
                 root,
                 source: path.join(root, RESULT_PATH),
             }), /clean/);
+        } finally {
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
+
+test('committed evidence check binds an evidence-only commit to source and docs',
+    async () => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), 'powgate-check-'));
+
+        try {
+            const evidence = await writePromotionRepository(root);
+            const destination = await promotePhase4CEvidence({
+                root,
+                source: path.join(root, RESULT_PATH),
+            });
+            const relative = path.relative(root, destination);
+            const readme = path.join(root, 'docs/benchmarks/phase4c-v1/README.md');
+            await fs.writeFile(readme, [
+                '# Canonical evidence',
+                '',
+                `Tested source: \`${evidence.tested_source.commit}\``,
+                `Result: [${path.basename(relative)}](./${path.basename(relative)})`,
+                'Selected primary backend: `subtle`',
+                '',
+            ].join('\n'));
+            runGit(root, 'add', 'docs/benchmarks/phase4c-v1');
+            runGit(root, 'commit', '-qm', 'evidence only');
+
+            const checked = await checkCommittedPhase4CEvidence({ root });
+            assert.equal(checked.relativeEvidence, relative);
+            assert.equal(checked.testedSourceCommit,
+                evidence.tested_source.commit);
+
+            await fs.writeFile(readme, '# missing identities\n');
+            await assert.rejects(
+                checkCommittedPhase4CEvidence({ root }), /README/,
+            );
+        } finally {
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
+
+test('committed evidence check rejects a non-evidence change in final commit',
+    async () => {
+        const root = await fs.mkdtemp(
+            path.join(os.tmpdir(), 'powgate-check-scope-'),
+        );
+
+        try {
+            const evidence = await writePromotionRepository(root);
+            const destination = await promotePhase4CEvidence({
+                root,
+                source: path.join(root, RESULT_PATH),
+            });
+            const basename = path.basename(destination);
+            const readme = path.join(root, 'docs/benchmarks/phase4c-v1/README.md');
+            await fs.writeFile(readme, [
+                `Tested source: \`${evidence.tested_source.commit}\``,
+                `Result: [${basename}](./${basename})`,
+                'Selected primary backend: `subtle`',
+                '',
+            ].join('\n'));
+            await fs.appendFile(path.join(root, 'html/challenge.html'), '\n');
+            runGit(root, 'add', '.');
+            runGit(root, 'commit', '-qm', 'mixed evidence and source');
+
+            await assert.rejects(
+                checkCommittedPhase4CEvidence({ root }), /evidence-only/,
+            );
         } finally {
             await fs.rm(root, { recursive: true, force: true });
         }

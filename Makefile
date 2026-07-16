@@ -16,7 +16,8 @@ COVERAGE_CFLAGS := $(PURE_CFLAGS) -O0 --coverage
 COVERAGE_LDFLAGS := --coverage
 
 .PHONY: check-policy check-test-env challenge-page module fault-modules \
-	test-tools test-browser-evidence test-browser-benchmark test-unit browser-tools \
+	test-tools test-browser-unit test-browser-evidence \
+	test-browser-benchmark check-phase4c-evidence test-unit browser-tools \
 	test-vector-python test-fuzz test-fuzz-long test-coverage \
 	test-integration test-js test-e2e asan check clean \
 	test-browser-feasibility test-browser-e2e \
@@ -38,13 +39,23 @@ challenge-page: $(CHALLENGE_HEADER)
 
 test-tools: test-browser-evidence test-browser-benchmark
 	python3 -m unittest -v tests.tools.test_build_pow_challenge \
-		tests.tools.test_refsolve tests.tools.test_check_policy
+		tests.tools.test_refsolve tests.tools.test_check_policy \
+		tests.tools.test_phase4c_release_gate
+
+test-browser-unit: browser-tools
+	node --test tests/browser/fixture.test.mjs \
+		tests/browser/request-observation.test.mjs \
+		tests/browser/e2e.test.mjs tests/browser/sanitizer.test.mjs \
+		tests/browser/evidence.test.mjs tests/browser/benchmark.test.mjs
 
 test-browser-evidence:
 	node --test tests/browser/evidence.test.mjs
 
 test-browser-benchmark:
 	node --test tests/browser/benchmark.test.mjs
+
+check-phase4c-evidence: check-policy test-browser-evidence
+	node tools/check-phase4c-evidence.mjs
 
 $(BUILD_DIR)/browser-tools/cookie-occurrences: \
 		tests/browser/cookie_occurrences.c src/pow_cookie_scan.c \
@@ -293,8 +304,8 @@ check-browser-x86:
 asan: check-policy check-test-env
 	./tools/run-asan.sh
 
-check: check-policy test-tools test-unit test-coverage module test-integration \
-		test-e2e test-fuzz asan
+check: check-policy test-tools test-browser-unit test-unit test-coverage module \
+		test-integration test-e2e test-fuzz asan
 
 clean:
 	rm -rf $(BUILD_DIR)/coverage $(BUILD_DIR)/fuzz $(BUILD_DIR)/tests \

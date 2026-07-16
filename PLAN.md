@@ -526,20 +526,31 @@ pass-through, against a real nginx.
 
 Tasks:
 
-1. E2E test (`tests/e2e/`): node script (or headless chromium if available
-   in CI) loads the 503 page from a real nginx, executes the served
-   solver against the served parameters, reloads, asserts 200 + `__pow`
-   cookie present + `__pow_p` cleared. This is the only test that catches
-   server/JS encoding drift — it is mandatory, not optional.
-2. Fuzz corpora expanded with real cookie/proof shapes captured from the
-   e2e run.
-3. Measure the already-correct JavaScript kernel and sequential SubtleCrypto
-   backend in recorded real-browser/device environments, including throughput
-   and event-loop responsiveness. Choose one fixed backend order from that
-   evidence and make only measurement-supported tuning; no Node timing
-   threshold or mid-search fallback is introduced.
+1. The pinned native x86_64 Chromium matrix executes the exact generated
+   production solver over explicitly asserted HTTP/1.1 and HTTP/2. Each
+   server build runs eight complete challenge/proof/auth/backend loops and two
+   browser-native partitioned-cookie fail-closed cases. The same ten cases run
+   against the normal and ASan+UBSan NGINX/module builds.
+2. The controller-observer equivalence contract proves that the narrow
+   negative-case call counter does not alter cookie, navigation, scheduling,
+   or network behavior. Positive cases execute the untouched production
+   namespace.
+3. The reproducible browser benchmark runs seven alternating matched pairs
+   for the existing JavaScript and sequential SubtleCrypto backends, enforces
+   correctness and responsiveness per repetition, and writes schema-validated
+   raw evidence under `build/`. Throughput may select only the fixed pre-search
+   backend order; there is no runtime benchmark, dynamic selection, or
+   mid-search fallback.
+4. Canonical evidence is promoted only after the clean final source passes
+   the project gate, native browser aggregate, and long fuzz gate. The
+   evidence-only commit then runs the lightweight schema, relational,
+   source-identity, policy, and documentation-link gate.
 
-**Gate:** `make check && make test-e2e` green; fuzz-long re-run clean.
+**Gate:** inside the golden image, `make check` and `make test-fuzz-long`
+pass; on the canonical native x86_64 worker,
+`tools/run-browser-x86.sh check-browser-x86` passes. A later standalone clean
+benchmark agrees with the fixed production order and is promoted under
+`docs/benchmarks/phase4c-v1/` before Phase 4C is complete.
 
 ---
 

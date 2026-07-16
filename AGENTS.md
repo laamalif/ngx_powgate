@@ -66,6 +66,13 @@ The image base and Debian repository snapshot must be pinned; nginx.org
 package inputs and the pinned NGINX source SHA-256 must be recorded in a
 committed version lock.
 
+Browser-specific Phase 4C targets MUST be invoked through
+`tools/run-browser-x86.sh` on the canonical native x86_64 worker. They never
+skip, emulate another architecture, attach to a remote browser, select an
+alternate browser, or weaken Chromium's sandbox. Positive browser E2E cases
+execute the untouched production namespace, and the complete browser matrix
+remains subject to the normal plus ASan/UBSan server policy.
+
 ## NGINX Build and Runtime Rules
 
 The golden image MUST use Debian Trixie as the userspace base.

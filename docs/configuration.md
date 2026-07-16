@@ -182,8 +182,9 @@ The solver mines in bounded foreground slices, pauses while the document is
 hidden, reports probability-based progress, writes the fixed `__pow_p` proof
 cookie, verifies the browser made exactly one such cookie visible, and then
 reloads. It performs no network requests and uses no storage, workers,
-tracking, or external resources. Phase 4C remains responsible for validation
-inside a real browser engine.
+tracking, or external resources. The pinned native x86_64 Chromium gate
+validates the complete HTTP/1.1 and HTTP/2 challenge/reload/auth flow; this is
+the v0.1 browser acceptance boundary, not a broad compatibility claim.
 
 Before mining, the solver performs candidate-bounded proof-cookie cleanup. It
 always clears `Path=/`, clears each safely serializable segment-boundary
