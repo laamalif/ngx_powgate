@@ -281,6 +281,7 @@ async function writePromotionRepository(root) {
     runGit(root, 'init', '-q');
     runGit(root, 'config', 'user.email', 'powgate-test@example.invalid');
     runGit(root, 'config', 'user.name', 'PowGate Test');
+    runGit(root, 'commit', '--allow-empty', '-qm', 'base');
     runGit(root, 'add', '.');
     runGit(root, 'commit', '-qm', 'fixture');
 
@@ -561,6 +562,53 @@ test('committed evidence check binds an evidence-only commit to source and docs'
             await fs.writeFile(readme, '# missing identities\n');
             await assert.rejects(
                 checkCommittedPhase4CEvidence({ root }), /README/,
+            );
+        } finally {
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
+
+test('committed evidence check accepts an evidence commit below merge HEAD',
+    async () => {
+        const root = await fs.mkdtemp(
+            path.join(os.tmpdir(), 'powgate-check-merge-'),
+        );
+
+        try {
+            const evidence = await writePromotionRepository(root);
+            const sourceCommit = evidence.tested_source.commit;
+            const baseCommit = runGit(root, 'rev-parse', `${sourceCommit}^`);
+            const destination = await promotePhase4CEvidence({
+                root,
+                source: path.join(root, RESULT_PATH),
+            });
+            const relative = path.relative(root, destination);
+            const basename = path.basename(relative);
+            const readme = path.join(root, 'docs/benchmarks/phase4c-v1/README.md');
+            await fs.writeFile(readme, [
+                `Tested source: \`${sourceCommit}\``,
+                `Result: [${basename}](./${basename})`,
+                'Selected primary backend: `subtle`',
+                '',
+            ].join('\n'));
+            runGit(root, 'add', 'docs/benchmarks/phase4c-v1');
+            runGit(root, 'commit', '-qm', 'evidence only');
+            const evidenceCommit = runGit(root, 'rev-parse', 'HEAD');
+
+            runGit(root, 'checkout', '-q', '--detach', baseCommit);
+            runGit(root, 'merge', '-q', '--no-ff', '-m', 'merge evidence',
+                evidenceCommit);
+
+            const checked = await checkCommittedPhase4CEvidence({ root });
+            assert.equal(checked.relativeEvidence, relative);
+            assert.equal(checked.testedSourceCommit, sourceCommit);
+
+            await fs.appendFile(readme, '\n');
+            runGit(root, 'add', readme);
+            runGit(root, 'commit', '-qm', 'modify evidence documentation');
+            await assert.rejects(
+                checkCommittedPhase4CEvidence({ root }), /later modified/,
             );
         } finally {
             await fs.rm(root, { recursive: true, force: true });

@@ -23,7 +23,8 @@ const README = `${EVIDENCE_DIRECTORY}/README.md`;
 function git(root, args, options = {}) {
     return execFileSync('git', args, {
         cwd: root,
-        encoding: options.encoding ?? 'utf8',
+        encoding: Object.hasOwn(options, 'encoding')
+            ? options.encoding : 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
     });
 }
@@ -65,19 +66,41 @@ async function canonicalResult(root) {
 }
 
 
-function verifyEvidenceOnlyCommit(root, sourceCommit, relativeEvidence) {
-    const head = git(root, ['rev-parse', 'HEAD']).trim();
-    const parent = git(root, ['rev-parse', 'HEAD^']).trim();
+async function verifyEvidenceOnlyCommit(root, sourceCommit, relativeEvidence) {
+    const commits = git(root, [
+        'log', '--format=%H', '--diff-filter=A', 'HEAD', '--', relativeEvidence,
+    ]).trim().split('\n').filter(Boolean);
+    if (commits.length !== 1) {
+        throw new Error('canonical evidence must have one introducing commit');
+    }
+    const evidenceCommit = commits[0];
+    try {
+        git(root, [
+            'merge-base', '--is-ancestor', evidenceCommit, 'HEAD',
+        ]);
+    } catch (_error) {
+        throw new Error('evidence commit is not an ancestor of HEAD');
+    }
+    const parent = git(root, ['rev-parse', `${evidenceCommit}^`]).trim();
     if (parent !== sourceCommit) {
         throw new Error('evidence commit does not directly follow tested source');
     }
     const changed = git(root, [
-        'diff-tree', '--no-commit-id', '--name-only', '-r', head,
+        'diff-tree', '--no-commit-id', '--name-only', '-r', evidenceCommit,
     ]).trim().split('\n').filter(Boolean).sort();
     const expected = [README, relativeEvidence].sort();
     if (changed.length !== expected.length
         || changed.some((name, index) => name !== expected[index])) {
-        throw new Error('final commit is not an evidence-only change');
+        throw new Error('evidence commit is not an evidence-only change');
+    }
+    for (const relative of expected) {
+        const current = git(root, ['hash-object', '--', relative]).trim();
+        const committed = git(root, [
+            'rev-parse', `${evidenceCommit}:${relative}`,
+        ]).trim();
+        if (current !== committed) {
+            throw new Error('committed evidence or README was later modified');
+        }
     }
 }
 
@@ -107,7 +130,7 @@ export async function checkCommittedPhase4CEvidence({
         || !evidence.tested_source.worktree_clean) {
         throw new Error('canonical Phase 4C evidence is not promotable');
     }
-    verifyEvidenceOnlyCommit(repositoryRoot, sourceCommit, relative);
+    await verifyEvidenceOnlyCommit(repositoryRoot, sourceCommit, relative);
     if (trackedCommitTreeSha256(repositoryRoot, sourceCommit)
         !== evidence.tested_source.tracked_tree_sha256) {
         throw new Error('tested source tree identity does not match evidence');
