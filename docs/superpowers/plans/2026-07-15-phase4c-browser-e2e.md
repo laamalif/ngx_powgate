@@ -6,6 +6,16 @@
 > the partitioned-case requirements consumed by Task 8. Do not implement the
 > parent-domain steps below; they remain only as historical planning context.
 
+> **Implementation status:** Phase 4C browser feasibility, permanent H1/H2
+> E2E coverage, partitioned fail-closed coverage, observer equivalence, and
+> normal plus ASan/UBSan twenty-case execution are complete. Each server build
+> passes eight positive and two partitioned negative cases. The former
+> parent-domain negative task is superseded by the evidence-backed
+> partitioned-cookie matrix. Phase 4C remains incomplete pending benchmark
+> schema and validation, reproducible browser measurement, the fixed
+> backend-order decision, canonical evidence promotion, and final aggregate
+> release gates.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a pinned, sandboxed native x86_64 Chromium gate that proves PowGate's complete browser loop under HTTP/1.1 and HTTP/2, repeats it against ASan+UBSan server artifacts, and records reproducible backend benchmark evidence.
@@ -32,7 +42,7 @@ export CONTAINERS_NO_SYSTEMD=1
 - Chromium executes the exact production script generated from `html/challenge.html` and served by NGINX. Positive E2E and benchmark pages do not wrap or replace `PowGateSolver`, `crypto.subtle.digest()`, timers, Promises, or production source.
 - Keep all wire formats, cookie formats, challenge parameters, server-verification semantics, and CSP policy unchanged. Throughput may change only the controller's fixed pre-search backend order.
 - Preserve the existing architecture-neutral `make check`, `make test-e2e`, and `make test-fuzz-long` meanings. New browser code adds no production directive, runtime dependency, release artifact, protocol vector, or fuzz target.
-- Browser E2E covers the same ten cases under the normal server and a separately built ASan+UBSan server: eight positive solve loops plus two parent-domain fail-closed cases, for twenty browser cases total.
+- Browser E2E covers the same ten cases under the normal server and a separately built ASan+UBSan server: eight positive solve loops plus two partitioned-cookie fail-closed cases, for twenty browser cases total.
 - Every resource has bounded, idempotent cleanup. A callback failure remains primary; diagnostic and cleanup failures are separate classified secondary failures.
 - Freeze these operation deadlines in `tests/browser/lib/constants.mjs`:
 
@@ -848,7 +858,11 @@ git commit -m "test: add real browser PowGate solve matrix"
 
 ---
 
-### Task 7: Add Parent-Domain Fail-Closed Browser Cases
+### Task 7: Superseded — Add Parent-Domain Fail-Closed Browser Cases
+
+**Status:** Superseded by the evidence-backed partitioned-cookie amendment and
+retained below only as historical planning context. The permanent matrix uses
+one browser-native partitioned-cookie fail-closed case per protocol instead.
 
 **Files:**
 - Modify: `tests/browser/e2e.mjs`
@@ -906,7 +920,16 @@ git commit -m "test: cover undeletable proof cookies in chromium"
 
 ---
 
-### Task 8: Run the Complete Browser Matrix Under ASan and UBSan
+### Task 8: Complete — Run the Browser Matrix Under ASan and UBSan
+
+**Status:** Complete. The permanent target passes the identical matrix under
+both server builds:
+
+```text
+normal:       8 positive + 2 partitioned negative = 10
+ASan+UBSan:   8 positive + 2 partitioned negative = 10
+combined:    20 cases, verdict=passed
+```
 
 **Files:**
 - Create: `tools/prepare-browser-sanitized.sh`
@@ -923,7 +946,7 @@ git commit -m "test: cover undeletable proof cookies in chromium"
 - `collectSanitizerReports(manifest, processIdentities) -> fixed verdict` collects reports that exist but does not require clean-run marker files.
 - `test-browser-e2e` runs normal 10 then sanitized 10 using identical browser cases/assertions.
 
-- [ ] **Step 1: Add failing policy and negative-control tests**
+- [x] **Step 1: Add failing policy and negative-control tests**
 
 Extend policy fixtures so any `-fno-sanitize=alignment` applied to PowGate, any PowGate-named suppression, wildcard/broad HTTP/2 suppression, or artifact containing `fault`/`negative-control` under `out/` fails. Keep the current exact upstream suppression allowlist.
 
@@ -936,7 +959,7 @@ node --test tests/browser/sanitizer.test.mjs
 Expected: FAIL because sanitizer manifest/report collection and the negative
 control artifact do not exist.
 
-- [ ] **Step 2: Factor reusable sanitized server preparation**
+- [x] **Step 2: Factor reusable sanitized server preparation**
 
 Move the instrumented NGINX/module build portion of `run-asan.sh` into `prepare-browser-sanitized.sh`. Configure locked source with Clang, `--with-debug`, SSL, HTTP/2, RealIP, compatibility, and:
 
@@ -946,23 +969,27 @@ Move the instrumented NGINX/module build portion of `run-asan.sh` into `prepare-
 
 Use eight jobs on x86_64. Manifest fields include paths, SHA-256 values, compile/link flags, dynamic runtime linkage/symbol inspection, and proof the artifacts differ from normal. “Linked native support code” means project-built native code in this build; do not claim system OpenSSL was rebuilt.
 
-- [ ] **Step 3: Test report collection and environment ownership**
+- [x] **Step 3: Test report collection and environment ownership**
 
 Run the negative control with the same UBSan report directory and require a captured project-owned alignment report. Separately inspect compilation metadata/policy to prove no PowGate suppression or alignment disable; the negative control is not the sole proof. Implement `collectSanitizerReports()` in the lifecycle-owned `tests/browser/lib/fixture.mjs`; E2E interprets its fixed verdict but does not own report-file cleanup.
 
 Tests require sanitizer variables on the NGINX master/workers but absent from Node/Chromium. Record sanitized master exact path/hash, every descendant worker generation, and all exits. Collect every report that exists; fail on any ASan/UBSan report, initialization error, deadly signal, allocator failure, abnormal exit, or sanitizer stderr signature. Do not require empty clean logs or startup/exit markers.
 
-- [ ] **Step 4: Execute the identical sanitized matrix**
+- [x] **Step 4: Execute the identical sanitized matrix**
 
 Update `e2e.mjs` to call the same frozen `runE2EMatrix()` first with normal paths/environment, then sanitized manifest paths/environment. Only server compiler/linker instrumentation differs. Use the same browser process policy, solver bytes, protocols, URLs, cookies, timeouts, and assertions.
 
-- [ ] **Step 5: Run sanitizer and browser gates, then commit**
+- [x] **Step 5: Run sanitizer and browser gates, then commit**
 
 ```sh
 tools/run-browser-x86.sh test-browser-e2e
 ```
 
-Expected fixed summary: `normal=10 sanitized=10 total=20 verdict=passed`, no sanitizer report, all worker generations exited.
+Expected fixed summary:
+`normal_positive=8 normal_partitioned_negative=2 normal_total=10`,
+`sanitized_positive=8 sanitized_partitioned_negative=2 sanitized_total=10`,
+and `combined_total=20 verdict=passed`; no sanitizer report, all worker
+generations exited.
 
 ```sh
 podman run --rm --userns=keep-id -v "$PWD:/work:Z" -w /work \
