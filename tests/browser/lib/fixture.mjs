@@ -546,6 +546,7 @@ class BrowserSession {
         this.expectedDisconnect = false;
         this.pages = new Set();
         this.cdpSessions = new Set();
+        this.contexts = new Set();
     }
 
     #record(event) {
@@ -659,6 +660,7 @@ class BrowserSession {
             'browser_context', DEADLINES.browser_context,
             () => this.browser.createBrowserContext(),
         );
+        this.contexts.add(this.context);
         this.page = await withDeadline(
             'browser_context', DEADLINES.browser_context,
             () => this.context.newPage(),
@@ -709,6 +711,50 @@ class BrowserSession {
         this.#observePage(page);
         const cdp = await this.#attachCdp(page);
         return Object.freeze({ page, cdp });
+    }
+
+    async createIsolatedPage() {
+        this.assertHealthy();
+        const context = await withDeadline(
+            'browser_context', DEADLINES.browser_context,
+            () => this.browser.createBrowserContext(),
+        );
+        this.contexts.add(context);
+        const page = await withDeadline(
+            'browser_context', DEADLINES.browser_context,
+            () => context.newPage(),
+        );
+        this.#observePage(page);
+        const cdp = await this.#attachCdp(page);
+        let closed = false;
+        return Object.freeze({
+            cdp,
+            context,
+            page,
+            close: async () => {
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                await withDeadline(
+                    'cdp_operation', DEADLINES.cdp_operation,
+                    () => cdp.detach(),
+                );
+                this.cdpSessions.delete(cdp);
+                if (!page.isClosed()) {
+                    await withDeadline(
+                        'page_context_close', DEADLINES.page_context_close,
+                        () => page.close(),
+                    );
+                }
+                this.pages.delete(page);
+                await withDeadline(
+                    'page_context_close', DEADLINES.page_context_close,
+                    () => context.close(),
+                );
+                this.contexts.delete(context);
+            },
+        });
     }
 
     waitForDocument(url, startIndex = 0) {
@@ -780,16 +826,17 @@ class BrowserSession {
                 failure ??= error;
             }
         }
-        if (this.context !== null && connected) {
+        for (const context of connected ? [...this.contexts].reverse() : []) {
             try {
                 await withDeadline(
                     'page_context_close', DEADLINES.page_context_close,
-                    () => this.context.close(),
+                    () => context.close(),
                 );
             } catch (error) {
                 failure ??= error;
             }
         }
+        this.contexts.clear();
         if (this.browser !== null && connected) {
             try {
                 await withDeadline(

@@ -85,7 +85,12 @@ if [ "$architecture" != amd64 ]; then
     exit 2
 fi
 
-if [ -z "$image_id" ] || [ "$image_lock" != "$lock" ]; then
+case "$image_id" in
+    sha256:*) ;;
+    *) image_id="sha256:$image_id" ;;
+esac
+if ! printf '%s\n' "$image_id" | grep -Eq '^sha256:[0-9a-f]{64}$' \
+    || [ "$image_lock" != "$lock" ]; then
     echo "error: browser image identity or golden-image lock mismatch" >&2
     exit 2
 fi
@@ -100,6 +105,23 @@ if [ -z "$podman_version" ]; then
     exit 2
 fi
 
+source_commit=$(git rev-parse HEAD)
+if ! printf '%s\n' "$source_commit" | grep -Eq '^[0-9a-f]{40}$'; then
+    echo "error: Git source commit identity is invalid" >&2
+    exit 2
+fi
+if [ -z "$(git status --porcelain)" ]; then
+    source_worktree_clean=true
+else
+    source_worktree_clean=false
+fi
+tracked_tree_sha256=$(git ls-files --stage -z | sha256sum | awk '{ print $1 }')
+if ! printf '%s\n' "$tracked_tree_sha256" \
+    | grep -Eq '^[0-9a-f]{64}$'; then
+    echo "error: Git tracked-tree identity is invalid" >&2
+    exit 2
+fi
+
 exec podman run --rm \
     --userns=keep-id \
     -v "$root:/work:Z" \
@@ -110,5 +132,8 @@ exec podman run --rm \
     -e "POWGATE_IMAGE_DIGEST=$image_digest" \
     -e "POWGATE_IMAGE_LOCK=$image_lock" \
     -e "POWGATE_PODMAN_VERSION=$podman_version" \
+    -e "POWGATE_SOURCE_COMMIT=$source_commit" \
+    -e "POWGATE_SOURCE_WORKTREE_CLEAN=$source_worktree_clean" \
+    -e "POWGATE_TRACKED_TREE_SHA256=$tracked_tree_sha256" \
     "$image" \
     make "$target"

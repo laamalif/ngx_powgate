@@ -35,8 +35,23 @@ if [ "${POWGATE_HOST_UID+x}" != x ] \
     || [ "${POWGATE_IMAGE_ID+x}" != x ] \
     || [ "${POWGATE_IMAGE_DIGEST+x}" != x ] \
     || [ "${POWGATE_IMAGE_LOCK+x}" != x ] \
-    || [ "${POWGATE_PODMAN_VERSION+x}" != x ]; then
+    || [ "${POWGATE_PODMAN_VERSION+x}" != x ] \
+    || [ "${POWGATE_SOURCE_COMMIT+x}" != x ] \
+    || [ "${POWGATE_SOURCE_WORKTREE_CLEAN+x}" != x ] \
+    || [ "${POWGATE_TRACKED_TREE_SHA256+x}" != x ]; then
     fail "requires complete wrapper-provided metadata"
+fi
+if ! printf '%s\n' "$POWGATE_SOURCE_COMMIT" \
+    | grep -Eq '^[0-9a-f]{40}$'; then
+    fail "source commit identity is invalid"
+fi
+case "$POWGATE_SOURCE_WORKTREE_CLEAN" in
+    true | false) ;;
+    *) fail "source worktree identity is invalid" ;;
+esac
+if ! printf '%s\n' "$POWGATE_TRACKED_TREE_SHA256" \
+    | grep -Eq '^[0-9a-f]{64}$'; then
+    fail "tracked-tree identity is invalid"
 fi
 
 architecture=$(uname -m)

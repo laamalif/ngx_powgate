@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import pathlib
 import re
@@ -25,6 +26,8 @@ REMOTE_ENVIRONMENT = (
     "PUPPETEER_EXECUTABLE_PATH",
     "CHROME_PATH",
 )
+SOURCE_COMMIT = "1" * 40
+TRACKED_TREE_SHA256 = hashlib.sha256(b"fixture").hexdigest()
 
 
 def version_lock():
@@ -59,7 +62,7 @@ if args[0] == "info":
         os.environ.get("FAKE_ROOTLESS", "1") == "1"}}}))
 elif args[:2] == ["image", "inspect"]:
     print(json.dumps([{
-        "Id": "sha256:fixed-image-id",
+        "Id": "9" * 64,
         "Architecture": os.environ.get("FAKE_ARCH", "amd64"),
         "RepoDigests": ["localhost/ngx-powgate-dev@sha256:fixed-digest"],
         "Labels": {"org.ngx-powgate.golden-image-lock":
@@ -79,8 +82,13 @@ else:
         fake_git = self.bin / "git"
         fake_git.write_text(
             "#!/bin/sh\n"
-            "test \"$1 $2\" = \"rev-parse --show-toplevel\" || exit 2\n"
-            f"printf '%s\\n' {ROOT.resolve()}\n",
+            "case \"$*\" in\n"
+            f"  'rev-parse --show-toplevel') printf '%s\\n' {ROOT.resolve()} ;;\n"
+            f"  'rev-parse HEAD') printf '%s\\n' {SOURCE_COMMIT} ;;\n"
+            "  'status --porcelain') : ;;\n"
+            "  'ls-files --stage -z') printf fixture ;;\n"
+            "  *) exit 2 ;;\n"
+            "esac\n",
             encoding="utf-8",
         )
         fake_git.chmod(fake_git.stat().st_mode | stat.S_IXUSR)
@@ -126,13 +134,19 @@ else:
             "-e",
             f"POWGATE_HOST_GID={os.getgid()}",
             "-e",
-            "POWGATE_IMAGE_ID=sha256:fixed-image-id",
+            f"POWGATE_IMAGE_ID=sha256:{'9' * 64}",
             "-e",
             "POWGATE_IMAGE_DIGEST=localhost/ngx-powgate-dev@sha256:fixed-digest",
             "-e",
             f"POWGATE_IMAGE_LOCK={lock}",
             "-e",
             "POWGATE_PODMAN_VERSION=5.4.2",
+            "-e",
+            f"POWGATE_SOURCE_COMMIT={SOURCE_COMMIT}",
+            "-e",
+            "POWGATE_SOURCE_WORKTREE_CLEAN=true",
+            "-e",
+            f"POWGATE_TRACKED_TREE_SHA256={TRACKED_TREE_SHA256}",
             IMAGE,
             "make",
             target,
@@ -190,6 +204,9 @@ class RequireBrowserX86Test(unittest.TestCase):
                 "POWGATE_IMAGE_DIGEST": "",
                 "POWGATE_IMAGE_LOCK": version_lock()["GOLDEN_IMAGE_LOCK_SHA256"],
                 "POWGATE_PODMAN_VERSION": "5.4.2",
+                "POWGATE_SOURCE_COMMIT": SOURCE_COMMIT,
+                "POWGATE_SOURCE_WORKTREE_CLEAN": "true",
+                "POWGATE_TRACKED_TREE_SHA256": TRACKED_TREE_SHA256,
             }
         )
         if env:

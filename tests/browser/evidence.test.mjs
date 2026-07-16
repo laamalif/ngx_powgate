@@ -239,6 +239,7 @@ async function writePromotionRepository(root) {
     ]);
     const generator = Buffer.from('#!/usr/bin/env python3\n');
     const benchmark = Buffer.from('export const benchmark = true;\n');
+    const benchmarkDriver = Buffer.from('globalThis.driver = true;\n');
 
     await fs.mkdir(path.join(root, 'html'), { recursive: true });
     await fs.mkdir(path.join(root, 'tools'), { recursive: true });
@@ -248,6 +249,9 @@ async function writePromotionRepository(root) {
     await fs.writeFile(path.join(root, 'html/challenge.html'), html);
     await fs.writeFile(path.join(root, 'tools/build_pow_challenge.py'), generator);
     await fs.writeFile(path.join(root, 'tests/browser/benchmark.mjs'), benchmark);
+    await fs.writeFile(
+        path.join(root, 'tests/browser/benchmark-driver.js'), benchmarkDriver,
+    );
     await fs.writeFile(
         path.join(root, 'build/versions.env'),
         [
@@ -287,10 +291,15 @@ async function writePromotionRepository(root) {
     evidence.tested_source.generated_csp_hash =
         `sha256-${crypto.createHash('sha256').update(script).digest('base64')}`;
     evidence.tested_source.generator_sha256 = sha256(generator);
-    const length = Buffer.alloc(8);
-    length.writeBigUInt64BE(BigInt(benchmark.length));
+    const implementation = crypto.createHash('sha256');
+    for (const bytes of [benchmark, benchmarkDriver]) {
+        const length = Buffer.alloc(8);
+        length.writeBigUInt64BE(BigInt(bytes.length));
+        implementation.update(length);
+        implementation.update(bytes);
+    }
     evidence.tested_source.benchmark_implementation_sha256 =
-        sha256(Buffer.concat([length, benchmark]));
+        implementation.digest('hex');
     await fs.mkdir(path.join(root, 'build'), { recursive: true });
     await fs.writeFile(path.join(root, RESULT_PATH), canonicalJson(evidence));
     return evidence;

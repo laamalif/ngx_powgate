@@ -16,6 +16,7 @@ const MAX_EVIDENCE_BYTES = 16 * 1024 * 1024;
 const BACKENDS = Object.freeze(['js', 'subtle']);
 const BENCHMARK_IMPLEMENTATION_FILES = Object.freeze([
     'tests/browser/benchmark.mjs',
+    'tests/browser/benchmark-driver.js',
 ]);
 const ajv = new Ajv2020({
     allErrors: true,
