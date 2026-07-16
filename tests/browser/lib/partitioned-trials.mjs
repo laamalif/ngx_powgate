@@ -15,85 +15,12 @@ import {
     partitionedObserverSnapshot,
 } from './partitioned-proof.mjs';
 
-export { countExactProofCookies as countExactProofs };
-
-const BOOLEAN_FIELDS = Object.freeze([
-    'initial_document_visible',
-    'initial_request_present',
-    'observer_control_matches',
-    'partitioned_cookie_stored',
-    'post_cleanup_document_visible',
-    'post_cleanup_storage_present',
-]);
-const INTEGER_FIELDS = Object.freeze([
-    'backend_count',
-    'navigation_count',
-    'solver_calls',
-]);
-const OBSERVATION_FIELDS = Object.freeze([
-    ...BOOLEAN_FIELDS,
-    ...INTEGER_FIELDS,
-].sort());
 const AUTH_COOKIE_NAME = 'PowAuth';
 const BACKEND_BODY = 'powgate partitioned backend ok\n';
 const REQUEST_LOG_PATTERN = /^\{"request_uri":"((?:\\.|[^"\\])*)","cookie":"((?:\\.|[^"\\])*)","status":([0-9]{3})\}$/u;
 const SCANNER_PATH = path.resolve('build/browser-tools/cookie-occurrences');
 const SECRET_HEX = '000102030405060708090a0b0c0d0e0f'
     + '101112131415161718191a1b1c1d1e1f';
-
-function validateObservations(observations) {
-    if (observations === null || typeof observations !== 'object'
-        || Array.isArray(observations)
-        || Object.keys(observations).sort().join('\n')
-            !== OBSERVATION_FIELDS.join('\n')) {
-        throw new TypeError('invalid partitioned feasibility observations');
-    }
-    for (const field of BOOLEAN_FIELDS) {
-        if (typeof observations[field] !== 'boolean') {
-            throw new TypeError('invalid partitioned feasibility observations');
-        }
-    }
-    for (const field of INTEGER_FIELDS) {
-        if (!Number.isSafeInteger(observations[field])
-            || observations[field] < 0) {
-            throw new TypeError('invalid partitioned feasibility observations');
-        }
-    }
-}
-
-
-export function partitionedAcceptance(observations) {
-    validateObservations(observations);
-    return observations.partitioned_cookie_stored === true
-        && observations.initial_document_visible === true
-        && observations.initial_request_present === true
-        && observations.post_cleanup_document_visible === true
-        && observations.post_cleanup_storage_present === true
-        && observations.observer_control_matches === true
-        && observations.solver_calls === 0
-        && observations.navigation_count === 1
-        && observations.backend_count === 0;
-}
-
-
-export function buildPartitionedVerdict(observations) {
-    validateObservations(observations);
-    return Object.freeze({
-        acceptance_reached: partitionedAcceptance(observations),
-        backend_count: observations.backend_count,
-        initial_document_visible: observations.initial_document_visible,
-        initial_request_present: observations.initial_request_present,
-        navigation_count: observations.navigation_count,
-        observer_control_matches: observations.observer_control_matches,
-        partitioned_cookie_stored: observations.partitioned_cookie_stored,
-        post_cleanup_document_visible:
-            observations.post_cleanup_document_visible,
-        post_cleanup_storage_present:
-            observations.post_cleanup_storage_present,
-        solver_calls: observations.solver_calls,
-    });
-}
-
 
 async function renderNginxConfiguration({ paths, ports, modulePath }) {
     const backendLog = path.join(paths.logs, 'partitioned-backend.log');
@@ -311,47 +238,13 @@ async function runTrial(fixture, observed) {
 }
 
 
-function controlMatches(control, observed) {
-    const fields = [
-        'backend_count',
-        'initial_document_visible',
-        'initial_request_present',
-        'navigation_count',
-        'partitioned_cookie_stored',
-        'post_cleanup_document_visible',
-        'post_cleanup_storage_present',
-        'terminal',
-    ];
-    return fields.every((field) => control[field] === observed[field]);
-}
-
-
-export async function runPartitionedFeasibility() {
-    const trials = await runPartitionedTrials();
-
-    return buildPartitionedVerdict({
-        backend_count: trials.observed.backend_count,
-        initial_document_visible: trials.observed.initial_document_visible,
-        initial_request_present: trials.observed.initial_request_present,
-        navigation_count: trials.observed.navigation_count,
-        observer_control_matches: controlMatches(
-            trials.control, trials.observed,
-        ),
-        partitioned_cookie_stored:
-            trials.observed.partitioned_cookie_stored,
-        post_cleanup_document_visible:
-            trials.observed.post_cleanup_document_visible,
-        post_cleanup_storage_present:
-            trials.observed.post_cleanup_storage_present,
-        solver_calls: trials.observed.solve_calls,
-    });
-}
-
-
 export async function runPartitionedTrials({
-    target = 'test-browser-partitioned-feasibility',
-} = {}) {
+    target,
+}) {
     let trials;
+
+    assert.equal(typeof target, 'string');
+    assert.notEqual(target.length, 0);
 
     await withFixture({
         target,

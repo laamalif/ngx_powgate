@@ -6,7 +6,7 @@ image=localhost/ngx-powgate-dev:trixie
 
 case "${1-}" in
     test-browser-feasibility | test-browser-e2e | benchmark-browser \
-        | check-browser-x86 | test-browser-partitioned-feasibility)
+        | check-browser-x86)
         target=$1
         ;;
     *)

@@ -5,9 +5,9 @@
 Commit `5b14254` reached the complete acceptance tuple in pinned native
 Chromium. The construction is promoted by
 `2026-07-16-phase4c-partitioned-negative-matrix-amendment.md`; this document is
-retained as the historical feasibility contract and evidence rationale. The
-experimental target remains temporarily available only as a known-good
-comparison point during permanent-matrix implementation.
+retained as the historical feasibility result and evidence rationale. The
+temporary target, executable, and spike-only tests were removed after the
+normal and sanitized permanent matrices reproduced the result.
 
 ## Purpose
 
@@ -18,16 +18,9 @@ not itself change the Phase 4C acceptance matrix, production code, protocol,
 generated challenge bytes, or release gates. The later reviewed amendment owns
 promotion into the permanent matrix.
 
-The public experimental target is exactly:
-
-```text
-test-browser-partitioned-feasibility
-```
-
-It is not a prerequisite of `check-browser-x86`, `make check`, or another
-release target. The canonical host wrapper may invoke it only through the same
-native x86_64, rootless, sandboxed Podman boundary used by existing browser
-targets.
+The spike ran through the same native x86_64, rootless, sandboxed Podman
+boundary used by the permanent browser targets. It was never a prerequisite
+of `check-browser-x86`, `make check`, or another release target.
 
 ## Browser-native state
 
@@ -108,11 +101,11 @@ Likewise, historical `initial_request_present` recorded a production-scanner
 count equal to one. The permanent contract exposes that stronger meaning
 directly as `initial_request_proof_count = 1`.
 
-The experimental target reports the complete fixed verdict record and exits
+The historical spike reported the complete fixed verdict record and exited
 zero when the experiment executed correctly, regardless of whether the
 acceptance tuple was reached. Environment, fixture, protocol, observer,
-cleanup, or incomplete-observation failures exit nonzero. A negative
-reachability result is evidence, not a test failure.
+cleanup, or incomplete-observation failures exited nonzero. A negative
+reachability result was evidence, not a test failure.
 
 ## Outcome handling
 
@@ -134,7 +127,8 @@ The final rationale records all three evaluated browser-native constructions:
   remains stored and page-visible after cleanup and reaches fail-closed before
   mining.
 
-The spike itself never becomes canonical benchmark evidence. It remains
-outside `check-browser-x86` until the permanent H1/H2 cases pass under normal
-and sanitized NGINX, then is removed in a separate cleanup commit. Neither the
-spike nor its promotion changes `docs/protocol.md`.
+The spike itself never became canonical benchmark evidence. Its temporary
+surface was removed after the permanent H1/H2 cases passed under normal and
+sanitized NGINX. The shared observer, immutable cookie descriptor, observer
+equivalence contract, and this rationale remain. Neither the spike nor its
+promotion changes `docs/protocol.md`.

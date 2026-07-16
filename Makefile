@@ -21,7 +21,7 @@ COVERAGE_LDFLAGS := --coverage
 	test-integration test-js test-e2e asan check clean \
 	test-browser-feasibility test-browser-e2e \
 	test-browser-partitioned-observer-equivalence \
-	test-browser-partitioned-feasibility benchmark-browser \
+	benchmark-browser \
 	check-browser-x86
 
 check-policy:
@@ -272,11 +272,6 @@ test-browser-e2e: test-browser-partitioned-observer-equivalence browser-tools
 	timeout --signal=TERM --kill-after=20s 580s \
 		node tests/browser/e2e.mjs --sanitizer-manifest \
 		build/browser-sanitized/manifest.json
-
-test-browser-partitioned-feasibility: browser-tools module
-	./tools/require-browser-x86.sh test-browser-partitioned-feasibility
-	timeout --signal=TERM --kill-after=20s 160s \
-		node tests/browser/partitioned-feasibility.mjs
 
 benchmark-browser:
 	./tools/require-browser-x86.sh benchmark-browser

@@ -16,7 +16,6 @@ LABEL = "org.ngx-powgate.golden-image-lock"
 APPROVED = (
     "test-browser-feasibility",
     "test-browser-e2e",
-    "test-browser-partitioned-feasibility",
     "benchmark-browser",
     "check-browser-x86",
 )
@@ -140,7 +139,12 @@ else:
         ]
 
     def test_rejects_zero_two_or_unknown_targets(self):
-        for arguments in ((), ("unknown",), (APPROVED[0], APPROVED[1])):
+        for arguments in (
+            (),
+            ("unknown",),
+            ("test-browser-partitioned-feasibility",),
+            (APPROVED[0], APPROVED[1]),
+        ):
             with self.subTest(arguments=arguments):
                 self.assertNotEqual(self.run_wrapper(*arguments).returncode, 0)
 
@@ -224,6 +228,10 @@ class RequireBrowserX86Test(unittest.TestCase):
                 result = self.run_guard(env={name: "forbidden"})
                 self.assertNotEqual(result.returncode, 0)
 
+    def test_rejects_retired_partitioned_feasibility_target(self):
+        result = self.run_guard("test-browser-partitioned-feasibility")
+        self.assertNotEqual(result.returncode, 0)
+
 
 class BrowserMakeTargetsTest(unittest.TestCase):
     def test_browser_e2e_requires_partitioned_observer_equivalence(self):
@@ -244,6 +252,20 @@ class BrowserMakeTargetsTest(unittest.TestCase):
             "$(MAKE) test-browser-feasibility && $(MAKE) test-browser-e2e && "
             "$(MAKE) benchmark-browser",
             makefile.replace("\\\n\t  ", ""),
+        )
+
+    def test_experimental_partitioned_surface_is_absent(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        wrapper = WRAPPER.read_text(encoding="utf-8")
+        guard = GUARD.read_text(encoding="utf-8")
+
+        for source in (makefile, wrapper, guard):
+            self.assertNotIn("test-browser-partitioned-feasibility", source)
+        self.assertFalse(
+            (ROOT / "tests/browser/partitioned-feasibility.mjs").exists()
+        )
+        self.assertFalse(
+            (ROOT / "tests/browser/partitioned-feasibility.test.mjs").exists()
         )
 
 

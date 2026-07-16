@@ -201,18 +201,19 @@ The third construction is selected because it is the only demonstrated state
 that exercises the intended production boundary without profile editing,
 cookie-database mutation, CDP state manufacture, or production hooks.
 
-## Implementation and temporary-target lifecycle
+## Implementation and temporary-surface lifecycle
 
-Implementation proceeds in this order:
+Implementation completed in this order:
 
 1. commit this reviewed amendment;
 2. add the H1/H2 cases to the normal permanent E2E matrix;
 3. run the identical cases under ASan+UBSan;
 4. require the permanent matrix to reproduce the spike tuple;
-5. remove `test-browser-partitioned-feasibility` in a separate cleanup commit;
+5. remove the temporary feasibility target in a separate cleanup commit;
 6. retain the spike result and rejected constructions as rationale.
 
-The experimental target remains outside `check-browser-x86` while it serves as
-a known-good comparison point. It is not canonical benchmark evidence and is
-not itself a release gate. Promotion changes neither `docs/protocol.md` nor
-the v1 protocol.
+The experimental target remained outside `check-browser-x86` while it served
+as a known-good comparison point, then was removed after permanent normal and
+sanitized coverage passed. It was never canonical benchmark evidence or a
+release gate. Promotion changes neither `docs/protocol.md` nor the v1
+protocol.
